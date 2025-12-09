@@ -37,6 +37,17 @@ impl fmt::Display for AppError {
     }
 }
 
+// Add this after the Display implementation:
+impl std::error::Error for AppError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AppError::DatabaseError(e) => Some(e),
+            AppError::RedisError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match self {

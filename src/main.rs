@@ -16,7 +16,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use noteflow_backend::{
     config::Config,
-    db::{create_pool, create_redis_client, run_migrations},
+    db::{create_pool, create_redis_client, run_migrations_if_needed},
     handlers,
     middleware::{auth_middleware, rate_limit_middleware, start_cleanup_task, RateLimiter},
     services::{AuthService, NoteService},
@@ -47,9 +47,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("✅ PostgreSQL connected with {} max connections", config.database_max_connections);
 
     // Run database migrations
-    tracing::info!("🔧 Running database migrations...");
-    run_migrations(&pool).await?;
-    tracing::info!("✅ Migrations completed");
+    // tracing::info!("🔧 Running database migrations...");
+    // run_migrations(&pool).await?;
+    // tracing::info!("✅ Migrations completed");
+
+    // Run database migrations if needed
+    run_migrations_if_needed(&pool).await?;
 
     // Create Redis connection
     tracing::info!("🔴 Connecting to Redis...");

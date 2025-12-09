@@ -1,10 +1,9 @@
-use redis::{aio::ConnectionManager, Client};
 use crate::utils::errors::{AppError, Result};
+use redis::{aio::ConnectionManager, Client};
 
 pub async fn create_redis_client(redis_url: &str) -> Result<ConnectionManager> {
-    let client = Client::open(redis_url)
-        .map_err(|e| AppError::RedisError(e))?;
-    
+    let client = Client::open(redis_url).map_err(|e| AppError::RedisError(e))?;
+
     ConnectionManager::new(client)
         .await
         .map_err(|e| AppError::RedisError(e))

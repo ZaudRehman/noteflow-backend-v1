@@ -1,6 +1,6 @@
+use crate::utils::errors::{AppError, Result};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::Duration;
-use crate::utils::errors::{AppError, Result};
 
 pub async fn create_pool(database_url: &str, max_connections: u32) -> Result<PgPool> {
     PgPoolOptions::new()
@@ -18,4 +18,30 @@ pub async fn run_migrations(pool: &PgPool) -> Result<()> {
         .run(pool)
         .await
         .map_err(|e| AppError::InternalError(format!("Migration failed: {}", e)))
+}
+
+pub async fn run_migrations_if_needed(pool: &PgPool) -> Result<()> {
+    // Check if _sqlx_migrations table exists
+    let needs_migration = sqlx::query_scalar::<_, bool>(
+        "SELECT NOT EXISTS (
+            SELECT FROM pg_tables 
+            WHERE schemaname = 'public' 
+            AND tablename = '_sqlx_migrations'
+        )",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    if needs_migration {
+        tracing::info!("🔧 First run detected, running migrations...");
+        sqlx::migrate!("./migrations")
+            .run(pool)
+            .await
+            .map_err(|e| AppError::InternalError(format!("Migration failed: {}", e)))?;
+        tracing::info!("✅ Migrations completed");
+    } else {
+        tracing::info!("✅ Database already migrated");
+    }
+
+    Ok(())
 }
