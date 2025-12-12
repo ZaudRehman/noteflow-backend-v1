@@ -1,5 +1,4 @@
 use axum::{
-    extract::ConnectInfo,
     middleware,
     routing::{delete, get, post, put},
     Router,
@@ -44,19 +43,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create database connection pool
     tracing::info!("📊 Connecting to PostgreSQL...");
     let pool = create_pool(&config.database_url, config.database_max_connections).await?;
-    tracing::info!("✅ PostgreSQL connected with {} max connections", config.database_max_connections);
-
-    // Run database migrations
-    // tracing::info!("🔧 Running database migrations...");
-    // run_migrations(&pool).await?;
-    // tracing::info!("✅ Migrations completed");
+    tracing::info!(
+        "✅ PostgreSQL connected with {} max connections",
+        config.database_max_connections
+    );
 
     // Run database migrations if needed
     run_migrations_if_needed(&pool).await?;
 
     // Create Redis connection
     tracing::info!("🔴 Connecting to Redis...");
-    let redis_conn = create_redis_client(&config.redis_url).await?;
+    let _redis_conn = create_redis_client(&config.redis_url).await?;
     tracing::info!("✅ Redis connected");
 
     // Initialize JWT manager
@@ -87,7 +84,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_cleanup_task(authenticated_rate_limiter.clone());
     tracing::info!("✅ Rate limiters initialized");
 
-    // Build public routes (no authentication required)
+    // Build public routes with /api/v1 prefix
     let public_routes = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/auth/register", post(handlers::auth::register))
@@ -99,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             rate_limit_middleware,
         ));
 
-    // Build protected routes (authentication required)
+    // Build protected routes with /api/v1 prefix
     let protected_routes = Router::new()
         .route("/api/v1/notes", get(handlers::notes::list_notes))
         .route("/api/v1/notes", post(handlers::notes::create_note))
@@ -120,12 +117,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
-        // CORS layer - configure based on your needs
+        // 🔥 FIXED CORS: Specify explicit headers when using credentials
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
                 .allow_methods(Any)
-                .allow_headers(Any)
+                .allow_headers([
+                    axum::http::header::AUTHORIZATION,
+                    axum::http::header::CONTENT_TYPE,
+                    axum::http::header::ACCEPT,
+                ])
                 .allow_credentials(true),
         )
         // Compression layer
@@ -141,15 +142,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = SocketAddr::from(([0, 0, 0, 0], config.port));
     tracing::info!("🌐 Server listening on {}", addr);
     tracing::info!("📝 API Documentation:");
-    tracing::info!("   - GET  /health             - Health check");
-    tracing::info!("   - POST /api/v1/auth/register      - Register new user");
-    tracing::info!("   - POST /api/v1/auth/login         - User login");
-    tracing::info!("   - POST /api/v1/auth/refresh       - Refresh access token");
-    tracing::info!("   - GET  /api/v1/notes              - List notes (auth required)");
-    tracing::info!("   - POST /api/v1/notes              - Create note (auth required)");
-    tracing::info!("   - GET  /api/v1/notes/:id          - Get note (auth required)");
-    tracing::info!("   - PUT  /api/v1/notes/:id          - Update note (auth required)");
-    tracing::info!("   - DELETE /api/v1/notes/:id        - Delete note (auth required)");
+    tracing::info!("  - GET  /health                   - Health check");
+    tracing::info!("  - POST /api/v1/auth/register     - Register new user");
+    tracing::info!("  - POST /api/v1/auth/login        - User login");
+    tracing::info!("  - POST /api/v1/auth/refresh      - Refresh access token");
+    tracing::info!("  - GET  /api/v1/notes             - List notes (auth required)");
+    tracing::info!("  - POST /api/v1/notes             - Create note (auth required)");
+    tracing::info!("  - GET  /api/v1/notes/:id         - Get note (auth required)");
+    tracing::info!("  - PUT  /api/v1/notes/:id         - Update note (auth required)");
+    tracing::info!("  - DELETE /api/v1/notes/:id       - Delete note (auth required)");
     tracing::info!("✨ Server ready to accept connections!");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
