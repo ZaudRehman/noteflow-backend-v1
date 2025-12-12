@@ -90,9 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Build public routes (no authentication required)
     let public_routes = Router::new()
         .route("/health", get(health_check))
-        .route("/auth/register", post(handlers::auth::register))
-        .route("/auth/login", post(handlers::auth::login))
-        .route("/auth/refresh", post(handlers::auth::refresh))
+        .route("/api/v1/auth/register", post(handlers::auth::register))
+        .route("/api/v1/auth/login", post(handlers::auth::login))
+        .route("/api/v1/auth/refresh", post(handlers::auth::refresh))
         .with_state(auth_service)
         .layer(middleware::from_fn_with_state(
             anonymous_rate_limiter.clone(),
@@ -101,11 +101,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Build protected routes (authentication required)
     let protected_routes = Router::new()
-        .route("/notes", get(handlers::notes::list_notes))
-        .route("/notes", post(handlers::notes::create_note))
-        .route("/notes/:id", get(handlers::notes::get_note))
-        .route("/notes/:id", put(handlers::notes::update_note))
-        .route("/notes/:id", delete(handlers::notes::delete_note))
+        .route("/api/v1/notes", get(handlers::notes::list_notes))
+        .route("/api/v1/notes", post(handlers::notes::create_note))
+        .route("/api/v1/notes/:id", get(handlers::notes::get_note))
+        .route("/api/v1/notes/:id", put(handlers::notes::update_note))
+        .route("/api/v1/notes/:id", delete(handlers::notes::delete_note))
         .with_state(note_service)
         .layer(middleware::from_fn_with_state(
             (jwt_manager.clone(), pool.clone()),
@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .allow_origin(Any)
                 .allow_methods(Any)
                 .allow_headers(Any)
-                .allow_credentials(false),
+                .allow_credentials(true),
         )
         // Compression layer
         .layer(CompressionLayer::new())
@@ -142,14 +142,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("🌐 Server listening on {}", addr);
     tracing::info!("📝 API Documentation:");
     tracing::info!("   - GET  /health             - Health check");
-    tracing::info!("   - POST /auth/register      - Register new user");
-    tracing::info!("   - POST /auth/login         - User login");
-    tracing::info!("   - POST /auth/refresh       - Refresh access token");
-    tracing::info!("   - GET  /notes              - List notes (auth required)");
-    tracing::info!("   - POST /notes              - Create note (auth required)");
-    tracing::info!("   - GET  /notes/:id          - Get note (auth required)");
-    tracing::info!("   - PUT  /notes/:id          - Update note (auth required)");
-    tracing::info!("   - DELETE /notes/:id        - Delete note (auth required)");
+    tracing::info!("   - POST /api/v1/auth/register      - Register new user");
+    tracing::info!("   - POST /api/v1/auth/login         - User login");
+    tracing::info!("   - POST /api/v1/auth/refresh       - Refresh access token");
+    tracing::info!("   - GET  /api/v1/notes              - List notes (auth required)");
+    tracing::info!("   - POST /api/v1/notes              - Create note (auth required)");
+    tracing::info!("   - GET  /api/v1/notes/:id          - Get note (auth required)");
+    tracing::info!("   - PUT  /api/v1/notes/:id          - Update note (auth required)");
+    tracing::info!("   - DELETE /api/v1/notes/:id        - Delete note (auth required)");
     tracing::info!("✨ Server ready to accept connections!");
 
     let listener = tokio::net::TcpListener::bind(addr).await?;

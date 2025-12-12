@@ -19,6 +19,34 @@ pub async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
+    let path = req.uri().path();
+    let method = req.method();
+    
+    // 🔥 FIX: Skip auth for public routes
+    let public_routes = vec![
+        "/health",
+        "/auth/register",
+        "/auth/login",
+        "/auth/refresh",
+        "/api/v1/auth/register",
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+    ];
+    
+    // Check if current path is public
+    if public_routes.iter().any(|route| path == *route || path.starts_with(route)) {
+        tracing::debug!("Public route, skipping auth: {}", path);
+        return Ok(next.run(req).await);
+    }
+    
+    // 🔥 FIX: Skip auth for OPTIONS requests (CORS preflight)
+    if method == "OPTIONS" {
+        tracing::debug!("OPTIONS request, skipping auth");
+        return Ok(next.run(req).await);
+    }
+    
+    tracing::debug!("Protected route, checking auth: {}", path);
+    
     // Extract token from Authorization header
     let token = req
         .headers()
@@ -26,22 +54,22 @@ pub async fn auth_middleware(
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
         .ok_or_else(|| {
-            tracing::warn!("Missing or invalid Authorization header");
+            tracing::warn!("Missing or invalid Authorization header for: {}", path);
             AppError::AuthenticationError("Missing authorization token".to_string())
         })?;
-
+    
     // Verify JWT token
     let claims = jwt_manager.verify_access_token(token).map_err(|e| {
         tracing::warn!("Token verification failed: {}", e);
         e
     })?;
-
+    
     // Parse user ID from claims
     let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
         tracing::error!("Invalid user ID format in token: {}", claims.sub);
         AppError::AuthenticationError("Invalid user ID in token".to_string())
     })?;
-
+    
     // Fetch user from database
     let user = sqlx::query_as!(
         User,
@@ -54,12 +82,12 @@ pub async fn auth_middleware(
         tracing::warn!("User not found for ID: {}", user_id);
         AppError::AuthenticationError("User not found".to_string())
     })?;
-
+    
     tracing::debug!("Authenticated user: {} ({})", user.email, user.id);
-
+    
     // Insert user into request extensions for handlers to access
     req.extensions_mut().insert(user);
-
+    
     // Continue to next middleware/handler
     Ok(next.run(req).await)
 }
@@ -89,6 +117,6 @@ pub async fn optional_auth_middleware(
             }
         }
     }
-
+    
     next.run(req).await
 }
