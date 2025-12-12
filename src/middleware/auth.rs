@@ -72,17 +72,16 @@ pub async fn auth_middleware(
     
     // Fetch user from database
     let user = sqlx::query_as!(
-    User,
-    "SELECT * FROM users WHERE id = $1",
-    user_id
-)
-.persistent(false)
-.fetch_optional(&pool)
-.await?
-.ok_or_else(|| {
-    tracing::warn!("User not found for ID: {}", user_id);
-    AppError::AuthenticationError("User not found".to_string())
-})?;
+        User,
+        "SELECT * FROM users WHERE id = $1",
+        user_id
+    )
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| {
+        tracing::warn!("User not found for ID: {}", user_id);
+        AppError::AuthenticationError("User not found".to_string())
+    })?;
     
     tracing::debug!("Authenticated user: {} ({})", user.email, user.id);
     
