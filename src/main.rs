@@ -117,11 +117,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
-        // 🔥 FIXED CORS: Specify explicit headers when using credentials
+        // CORS: Specify explicit headers when using credentials
         .layer(
             CorsLayer::new()
                 .allow_origin(Any)
-                .allow_methods(Any)
+                .allow_methods([
+                    axum::http::Method::GET,
+                    axum::http::Method::POST,
+                    axum::http::Method::PUT,
+                    axum::http::Method::PATCH,
+                    axum::http::Method::DELETE,
+                    axum::http::Method::OPTIONS,
+                ])
                 .allow_headers([
                     axum::http::header::AUTHORIZATION,
                     axum::http::header::CONTENT_TYPE,
