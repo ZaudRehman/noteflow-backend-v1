@@ -134,7 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::ACCEPT,
                 ])
-                .allow_credentials(true),
+               /// .allow_credentials(true),
         )
         // Compression layer
         .layer(CompressionLayer::new())
