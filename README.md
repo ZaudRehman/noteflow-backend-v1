@@ -6,7 +6,7 @@
 
 ![Rust](https://img.shields.io/badge/Rust-1.75+-000000?style=for-the-badge&logo=rust&logoColor=white) ![Axum](https://img.shields.io/badge/Axum-0.7-EC5800?style=for-the-badge&logo=rust&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7+-DC382D?style=for-the-badge&logo=redis&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white) ![Upstash](https://img.shields.io/badge/Upstash-00E9A3?style=for-the-badge&logo=upstash&logoColor=white)
 
-[Live Demo](#) · [API Docs](#api-documentation) · [Report Bug](https://github.com/yourusername/noteflow-backend/issues) · [Request Feature](https://github.com/yourusername/noteflow-backend/issues)
+[Live Demo](#) · [API Docs](#api-documentation) · [Report Bug](https://github.com/ZaudRehman/noteflow-backend-v1/issues) · [Request Feature](https://github.com/ZaudRehman/noteflow-backend-v1/issues)
 
 </div>
 
@@ -25,7 +25,6 @@
 - [Deployment](#-deployment)
 - [Project Structure](#-project-structure)
 - [Security](#-security)
-- [Performance](#-performance)
 - [Contributing](#-contributing)
 - [License](#-license)
 - [Contact](#-contact)
@@ -34,20 +33,20 @@
 
 ## 🎯 About The Project
 
-NoteFlow Backend is a **high-performance REST API** built with Rust that powers a collaborative note-taking application. Designed with production readiness in mind, it demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication, and cloud-native deployment.
+NoteFlow Backend is a **high-performance REST API** built with Rust that powers a collaborative note-taking application. Designed with production readiness in mind, it demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication and cloud-native deployment.
 
 ### Why NoteFlow Backend?
 
 This project showcases mastery of critical backend engineering competencies:
 
-- 🚀 **High Performance** - Built with Rust for blazing-fast response times (<200ms p95)
-- 🔐 **Enterprise Security** - JWT authentication, bcrypt hashing, rate limiting
-- 📊 **Scalable Architecture** - Async/await patterns, connection pooling, horizontal scaling
-- 🔄 **Real-Time Sync** - WebSocket support with Redis pub/sub for multi-instance coordination
-- 📚 **Version Control** - Automatic revision history via PostgreSQL triggers
-- 🏷️ **Smart Organization** - Tag system with many-to-many relationships
-- 🛡️ **Production Ready** - Comprehensive error handling, structured logging, health checks
-- ☁️ **Cloud Native** - Docker support, Supabase/Upstash integration, multiple deployment options
+- **High Performance** - Built with Rust for blazing-fast response times (<200ms p95)
+- **Enterprise Security** - JWT authentication, bcrypt hashing, rate limiting
+- **Scalable Architecture** - Async/await patterns, connection pooling, horizontal scaling
+- **Real-Time Sync** - WebSocket support with Redis pub/sub for multi-instance coordination
+- **Version Control** - Automatic revision history via PostgreSQL triggers
+- **Smart Organization** - Tag system with many-to-many relationships
+- **Production Ready** - Comprehensive error handling, structured logging, health checks
+- **Cloud Native** - Docker support, Supabase/Upstash integration, multiple deployment options
 
 ### What This Demonstrates
 
@@ -66,13 +65,13 @@ This project showcases mastery of critical backend engineering competencies:
 
 ## ✨ Key Features
 
-### 🔐 Authentication & Authorization
+### Authentication & Authorization
 - **JWT Token System** - Dual token approach with access (24h) and refresh (7d) tokens
 - **Secure Password Storage** - Bcrypt hashing with configurable cost factor
 - **Token Refresh Flow** - Seamless token renewal without re-authentication
 - **User Management** - Registration, login, and session management
 
-### 📝 Note Management
+### Note Management
 - **Full CRUD Operations** - Create, read, update, delete with ownership verification
 - **Soft Delete** - Notes marked as deleted but recoverable
 - **Pagination** - Efficient data retrieval with configurable page sizes
@@ -81,27 +80,27 @@ This project showcases mastery of critical backend engineering competencies:
 - **User Limits** - Configurable maximum notes per user (default: 50)
 - **Content Validation** - Maximum note size enforcement (default: 100KB)
 
-### 📚 Version History
+### Version History
 - **Automatic Revisions** - PostgreSQL triggers create snapshots on content changes
 - **Revision Browsing** - List all historical versions with metadata
 - **Point-in-Time Restore** - Revert notes to any previous version
 - **Change Tracking** - Author and timestamp for every revision
 
-### 🏷️ Organization System
+### Organization System
 - **Custom Tags** - User-specific tags for categorization
 - **Many-to-Many Relations** - Multiple tags per note, multiple notes per tag
 - **Tag Management** - Create, update, delete tags independently
 - **Tag Statistics** - View note counts per tag
 - **Deduplication** - Unique constraint prevents duplicate tags
 
-### 🔄 Real-Time Collaboration (Ready)
+### Real-Time Collaboration (Ready)
 - **WebSocket Infrastructure** - Real-time message broadcasting
 - **Redis Pub/Sub** - Multi-instance synchronization
 - **Session Tracking** - Active user presence monitoring
 - **Connection Management** - Automatic cleanup of stale sessions
 - **Message Types** - Edit, cursor move, user join/leave events
 
-### 🛡️ Security & Performance
+### Security & Performance
 - **Rate Limiting** - IP-based throttling (20/min anonymous, 100/min authenticated)
 - **Input Validation** - Comprehensive sanitization and format checking
 - **SQL Injection Prevention** - Parameterized queries via SQLx
@@ -336,110 +335,51 @@ Authorization: Bearer <access_token>
 
 ### Endpoints Overview
 
-#### 🔐 Authentication
+#### Authentication
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `POST` | `/auth/register` | Register new user | ❌ |
-| `POST` | `/auth/login` | Login and receive tokens | ❌ |
-| `POST` | `/auth/refresh` | Refresh access token | ❌ |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/auth/register` | Register new user |
+| `POST` | `/auth/login` | Login and receive tokens |
+| `POST` | `/auth/refresh` | Refresh access token |
 
-#### 📝 Notes
+#### Notes
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `GET` | `/notes` | List all notes with pagination | ✅ |
-| `POST` | `/notes` | Create new note | ✅ |
-| `GET` | `/notes/:id` | Get specific note | ✅ |
-| `PUT` | `/notes/:id` | Update note | ✅ |
-| `DELETE` | `/notes/:id` | Soft delete note | ✅ |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/notes` | List all notes with pagination |
+| `POST` | `/notes` | Create new note |
+| `GET` | `/notes/:id` | Get specific note |
+| `PUT` | `/notes/:id` | Update note |
+| `DELETE` | `/notes/:id` | Soft delete note |
 
-#### 📚 Revisions
+#### Revisions
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `GET` | `/notes/:id/revisions` | List note revision history | ✅ |
-| `POST` | `/notes/:note_id/revisions/:revision_id/restore` | Restore to previous version | ✅ |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/notes/:id/revisions` | List note revision history |
+| `POST` | `/notes/:note_id/revisions/:revision_id/restore` | Restore to previous version |
 
-#### 🏷️ Tags
+#### Tags
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `GET` | `/tags` | List all tags | ✅ |
-| `POST` | `/tags` | Create new tag | ✅ |
-| `POST` | `/notes/:id/tags` | Add tags to note | ✅ |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/tags` | List all tags |
+| `POST` | `/tags` | Create new tag |
+| `POST` | `/notes/:id/tags` | Add tags to note |
 
-#### ⚡ WebSocket
+#### WebSocket
 
-| Protocol | Endpoint | Description | Auth Required |
-|----------|----------|-------------|---------------|
-| `WS` | `/ws/:note_id` | Real-time collaboration | ✅ |
+| Protocol | Endpoint | Description |
+|----------|----------|-------------|
+| `WS` | `/ws/:note_id` | Real-time collaboration |
 
-#### 🏥 Health Check
+#### Health Check
 
-| Method | Endpoint | Description | Auth Required |
-|--------|----------|-------------|---------------|
-| `GET` | `/health` | API health status | ❌ |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | API health status |
 
-### Request/Response Examples
-
-#### Register User
-```bash
-POST /auth/register
-Content-Type: application/json
-
-{
-  "email": "user@example.com",
-  "password": "SecurePass123!",
-  "display_name": "John Doe"
-}
-
-# Response (201 Created)
-{
-  "user": {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "email": "user@example.com",
-    "display_name": "John Doe",
-    "created_at": "2025-12-08T15:30:00Z"
-  },
-  "access_token": "eyJhbGc...",
-  "refresh_token": "eyJhbGc..."
-}
-```
-
-#### Create Note
-```bash
-POST /notes
-Authorization: Bearer <access_token>
-Content-Type: application/json
-
-{
-  "title": "Meeting Notes",
-  "content": "Discussed Q1 goals and project timeline"
-}
-
-# Response (201 Created)
-{
-  "id": "660e8400-e29b-41d4-a716-446655440000",
-  "title": "Meeting Notes",
-  "content": "Discussed Q1 goals and project timeline",
-  "created_at": "2025-12-08T16:00:00Z",
-  "updated_at": "2025-12-08T16:00:00Z",
-  "tags": []
-}
-```
-
-#### List Notes with Pagination
-```bash
-GET /notes?page=1&limit=20&tag=work
-Authorization: Bearer <access_token>
-
-# Response (200 OK)
-{
-  "notes": [...],
-  "total": 45
-}
-```
 
 ### HTTP Status Codes
 
@@ -591,13 +531,13 @@ CREATE TABLE note_tags (
 
 ### Database Optimizations
 
-- ✅ **Composite Indexes** - Fast user-specific queries
-- ✅ **Full-Text Search** - GIN indexes for content search
-- ✅ **Foreign Key Constraints** - Referential integrity
-- ✅ **Cascade Deletes** - Automatic cleanup of related data
-- ✅ **Automatic Timestamps** - Trigger-based updated_at
-- ✅ **Soft Deletes** - Recovery of deleted notes
-- ✅ **Connection Pooling** - Efficient resource usage
+- **Composite Indexes** - Fast user-specific queries
+- **Full-Text Search** - GIN indexes for content search
+- **Foreign Key Constraints** - Referential integrity
+- **Cascade Deletes** - Automatic cleanup of related data
+- **Automatic Timestamps** - Trigger-based updated_at
+- **Soft Deletes** - Recovery of deleted notes
+- **Connection Pooling** - Efficient resource usage
 
 ---
 
@@ -797,64 +737,35 @@ noteflow-backend/
 ## 🔒 Security
 
 ### Authentication
-- ✅ **JWT Tokens** - Industry-standard JSON Web Tokens
-- ✅ **Token Expiration** - Short-lived access (24h) + refresh (7d)
-- ✅ **Stateless Design** - No server-side session storage
-- ✅ **Secure Defaults** - HS256 algorithm with strong secrets
+- **JWT Tokens** - Industry-standard JSON Web Tokens
+- **Token Expiration** - Short-lived access (24h) + refresh (7d)
+- **Stateless Design** - No server-side session storage
+- **Secure Defaults** - HS256 algorithm with strong secrets
 
 ### Password Security
-- ✅ **Bcrypt Hashing** - Industry-standard with cost factor 10
-- ✅ **Salt Generation** - Unique salt per password
-- ✅ **No Plain Text** - Passwords never stored or logged
-- ✅ **Timing-Safe Comparison** - Prevents timing attacks
+- **Bcrypt Hashing** - Industry-standard with cost factor 10
+- **Salt Generation** - Unique salt per password
+- **No Plain Text** - Passwords never stored or logged
+- **Timing-Safe Comparison** - Prevents timing attacks
 
 ### Input Validation
-- ✅ **Email Validation** - RFC 5322 compliant
-- ✅ **Password Strength** - Minimum 8 characters
-- ✅ **Content Sanitization** - Trim and validate all inputs
-- ✅ **Size Limits** - Configurable maximum sizes
-- ✅ **SQL Injection Prevention** - Parameterized queries
+- **Email Validation** - RFC 5322 compliant
+- **Password Strength** - Minimum 8 characters
+- **Content Sanitization** - Trim and validate all inputs
+- **Size Limits** - Configurable maximum sizes
+- **SQL Injection Prevention** - Parameterized queries
 
 ### Rate Limiting
-- ✅ **IP-Based Throttling** - Sliding window algorithm
-- ✅ **Anonymous Limits** - 20 requests/minute
-- ✅ **Authenticated Limits** - 100 requests/minute
-- ✅ **Background Cleanup** - Prevents memory leaks
+- **IP-Based Throttling** - Sliding window algorithm
+- **Anonymous Limits** - 20 requests/minute
+- **Authenticated Limits** - 100 requests/minute
+- **Background Cleanup** - Prevents memory leaks
 
 ### Additional Measures
-- ✅ **CORS Configuration** - Controlled origin access
-- ✅ **TLS Support** - HTTPS enforcement in production
-- ✅ **Error Sanitization** - No sensitive data in errors
-- ✅ **Structured Logging** - Audit trail without secrets
-
----
-
-## ⚡ Performance
-
-### Benchmarks
-
-- **API Response Time**: <200ms (p95)
-- **WebSocket Latency**: <100ms (p95)
-- **Concurrent Connections**: 1000+ per instance
-- **Database Query Time**: <50ms (indexed queries)
-- **Memory Usage**: ~50MB base + linear with connections
-
-### Optimizations
-
-- ✅ **Connection Pooling** - 20 max PostgreSQL connections
-- ✅ **Composite Indexes** - Fast user-specific queries
-- ✅ **Full-Text Search** - GIN indexes for content
-- ✅ **Async/Await** - Non-blocking I/O with Tokio
-- ✅ **Query Optimization** - Compile-time verification
-- ✅ **Compression** - Gzip for response bodies
-- ✅ **Redis Caching** - Future enhancement ready
-
-### Scalability
-
-- ✅ **Horizontal Scaling** - Redis pub/sub for multi-instance
-- ✅ **Stateless Design** - No in-memory session storage
-- ✅ **Database Pooling** - Efficient resource sharing
-- ✅ **Rate Limiting** - Prevents resource exhaustion
+- **CORS Configuration** - Controlled origin access
+- **TLS Support** - HTTPS enforcement in production
+- **Error Sanitization** - No sensitive data in errors
+- **Structured Logging** - Audit trail without secrets
 
 ---
 
@@ -880,17 +791,15 @@ Contributions are welcome! Please follow these guidelines:
 
 ## 📄 License
 
-Distributed under the **MIT License**. See `LICENSE` for more information.
+Distributed under the [**MIT License**](LICENSE). See `LICENSE` file for more information.
 
 ---
 
 ## 📧 Contact
 
-**Your Name** - [@yourtwitter](https://twitter.com/yourtwitter) · [LinkedIn](https://linkedin.com/in/yourname)
+**Zaud Rehman** - [@RehmanZaud](https://x.com/RehmanZaud) · [LinkedIn](https://www.linkedin.com/in/zaud-rehman-31514a288/)· zaudrehman@gmail.com
 
-**Project Link**: [https://github.com/yourusername/noteflow-backend](https://github.com/yourusername/noteflow-backend)
-
-**Live API**: [https://noteflow-api.example.com](https://noteflow-api.example.com)
+**Project Link**: [https://github.com/ZaudRehman/noteflow-backend-v1](https://github.com/ZaudRehman/noteflow-backend-v1)
 
 ---
 
