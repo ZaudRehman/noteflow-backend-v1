@@ -6,6 +6,7 @@ use crate::utils::{
     validation,
 };
 use sqlx::PgPool;
+use sqlx::Row;
 use uuid::Uuid;
 
 pub struct NoteService {
@@ -37,12 +38,14 @@ impl NoteService {
         let content = req.content.unwrap_or_default();
         validation::validate_note_content(&content, self.config.max_note_size)?;
 
-        let note = sqlx::query_as!(
-            Note,
+        let note = sqlx::query!(
             r#"INSERT INTO notes (user_id, title, content, last_edited_by)
                VALUES ($1, $2, $3, $1)
-               RETURNING id, user_id, title, content, last_edited_by, is_deleted, created_at, updated_at"#,
-            user_id, title, content
+               RETURNING id, user_id, title, content, last_edited_by, 
+                         is_favorited, is_archived, is_deleted, created_at, updated_at"#,
+            user_id,
+            title,
+            content
         )
         .fetch_one(&self.pool)
         .await?;
@@ -52,16 +55,21 @@ impl NoteService {
             title: note.title,
             content: note.content,
             last_edited_by: note.last_edited_by,
+            is_favorited: note.is_favorited,
+            is_archived: note.is_archived,
             created_at: note.created_at,
             updated_at: note.updated_at,
             tags: vec![],
+            active_users: vec![],
         })
     }
 
     pub async fn get(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
-        let note = sqlx::query_as!(
-            Note,
-            "SELECT * FROM notes WHERE id = $1 AND is_deleted = false",
+        let note = sqlx::query!(
+            r#"SELECT id, user_id, title, content, last_edited_by, 
+                      is_favorited, is_archived, is_deleted, created_at, updated_at 
+               FROM notes 
+               WHERE id = $1 AND is_deleted = false"#,
             note_id
         )
         .fetch_optional(&self.pool)
@@ -87,14 +95,20 @@ impl NoteService {
         .map(|r| r.name)
         .collect();
 
+        // Fetch active users
+        let active_users = self.get_active_users(note_id).await?;
+
         Ok(NoteResponse {
             id: note.id,
             title: note.title,
             content: note.content,
             last_edited_by: note.last_edited_by,
+            is_favorited: note.is_favorited,
+            is_archived: note.is_archived,
             created_at: note.created_at,
             updated_at: note.updated_at,
             tags,
+            active_users,
         })
     }
 
@@ -103,15 +117,16 @@ impl NoteService {
         let limit = params.limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
 
-        let notes = sqlx::query_as!(
-            Note,
-            r#"SELECT * FROM notes 
+        let notes = sqlx::query!(
+            r#"SELECT id, user_id, title, content, last_edited_by, 
+                      is_favorited, is_archived, is_deleted, created_at, updated_at 
+               FROM notes 
                WHERE user_id = $1 AND is_deleted = false
                ORDER BY updated_at DESC
                LIMIT $2 OFFSET $3"#,
             user_id,
-            limit,
-            offset
+            limit as i64,
+            offset as i64
         )
         .fetch_all(&self.pool)
         .await?;
@@ -127,20 +142,28 @@ impl NoteService {
 
         let mut responses = vec![];
         for note in notes {
+            let tags = self.get_note_tags(note.id).await?;
+            let active_users = self.get_active_users(note.id).await?;
+
             responses.push(NoteResponse {
                 id: note.id,
                 title: note.title,
                 content: note.content,
                 last_edited_by: note.last_edited_by,
+                is_favorited: note.is_favorited,
+                is_archived: note.is_archived,
                 created_at: note.created_at,
                 updated_at: note.updated_at,
-                tags: vec![],
+                tags,
+                active_users,
             });
         }
 
         Ok(NoteListResponse {
             notes: responses,
             total,
+            page,
+            per_page: limit,
         })
     }
 
@@ -150,9 +173,11 @@ impl NoteService {
         user_id: Uuid,
         req: UpdateNoteRequest,
     ) -> Result<NoteResponse> {
-        let note = sqlx::query_as!(
-            Note,
-            "SELECT * FROM notes WHERE id = $1 AND is_deleted = false",
+        let note = sqlx::query!(
+            r#"SELECT id, user_id, title, content, last_edited_by, 
+                      is_favorited, is_archived, is_deleted, created_at, updated_at
+               FROM notes 
+               WHERE id = $1 AND is_deleted = false"#,
             note_id
         )
         .fetch_optional(&self.pool)
@@ -206,7 +231,7 @@ impl NoteService {
         &self,
         note_id: Uuid,
         user_id: Uuid,
-    ) -> Result<NoteResponseEnhanced> {
+    ) -> Result<NoteResponse> {
         // Verify ownership
         self.verify_note_ownership(note_id, user_id).await?;
 
@@ -217,7 +242,7 @@ impl NoteService {
         .execute(&self.pool)
         .await?;
 
-        self.get_enhanced(note_id, user_id).await
+        self.get(note_id, user_id).await
     }
 
     /// Toggle archive status
@@ -225,7 +250,7 @@ impl NoteService {
         &self,
         note_id: Uuid,
         user_id: Uuid,
-    ) -> Result<NoteResponseEnhanced> {
+    ) -> Result<NoteResponse> {
         self.verify_note_ownership(note_id, user_id).await?;
 
         sqlx::query!(
@@ -235,7 +260,7 @@ impl NoteService {
         .execute(&self.pool)
         .await?;
 
-        self.get_enhanced(note_id, user_id).await
+        self.get(note_id, user_id).await
     }
 
     /// List notes with advanced filtering
@@ -243,7 +268,7 @@ impl NoteService {
         &self,
         user_id: Uuid,
         params: NoteFilterParams,
-    ) -> Result<NoteListResponseEnhanced> {
+    ) -> Result<NoteListResponse> {
         let page = params.page.unwrap_or(1).max(1);
         let limit = params.limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
@@ -264,7 +289,7 @@ impl NoteService {
         }
 
         // Build WHERE clause based on filter
-        let (filter_clause, is_archived_filter) = match params.filter.as_deref() {
+        let (filter_clause, _is_archived_filter) = match params.filter.as_deref() {
             Some("favorites") => ("AND n.is_favorited = true AND n.is_archived = false", false),
             Some("archived") => ("AND n.is_archived = true", true),
             _ => ("AND n.is_archived = false", false), // "all" or no filter
@@ -286,21 +311,20 @@ impl NoteService {
 
         let notes = sqlx::query(&query_str)
             .bind(user_id)
-            .bind(limit)
-            .bind(offset)
+            .bind(limit as i64)
+            .bind(offset as i64)
             .fetch_all(&self.pool)
             .await?;
 
         let count_query = format!(
-            "SELECT COUNT(*) FROM notes n WHERE n.user_id = $1 AND n.is_deleted = false {}",
+            "SELECT COUNT(*) as count FROM notes n WHERE n.user_id = $1 AND n.is_deleted = false {}",
             filter_clause
         );
 
         let total: i64 = sqlx::query_scalar(&count_query)
             .bind(user_id)
             .fetch_one(&self.pool)
-            .await?
-            .unwrap_or(0);
+            .await?;
 
         let mut responses = Vec::new();
         for row in notes {
@@ -308,7 +332,7 @@ impl NoteService {
             let tags = self.get_note_tags(note_id).await?;
             let active_users = self.get_active_users(note_id).await?;
 
-            responses.push(NoteResponseEnhanced {
+            responses.push(NoteResponse {
                 id: note_id,
                 title: row.try_get("title")?,
                 content: row.try_get("content")?,
@@ -322,14 +346,11 @@ impl NoteService {
             });
         }
 
-        let total_pages = (total as f64 / limit as f64).ceil() as i64;
-
-        Ok(NoteListResponseEnhanced {
+        Ok(NoteListResponse {
             notes: responses,
             total,
             page,
             per_page: limit,
-            total_pages,
         })
     }
 
@@ -345,7 +366,7 @@ impl NoteService {
             });
         }
 
-        let limit = params.limit.unwrap_or(50).min(100);
+        let limit = params.limit.unwrap_or(50).min(100) as i64;
 
         let notes = sqlx::query!(
             r#"
@@ -383,7 +404,7 @@ impl NoteService {
             let tags = self.get_note_tags(note.id).await?;
             let active_users = self.get_active_users(note.id).await?;
 
-            responses.push(NoteResponseEnhanced {
+            responses.push(NoteResponse {
                 id: note.id,
                 title: note.title,
                 content: note.content,
@@ -403,44 +424,6 @@ impl NoteService {
             notes: responses,
             total,
             query,
-        })
-    }
-
-    /// Get enhanced note response with tags and active users
-    pub async fn get_enhanced(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponseEnhanced> {
-        let note = sqlx::query!(
-            r#"
-            SELECT
-                id, title, content, last_edited_by,
-                is_favorited, is_archived, created_at, updated_at
-            FROM notes
-            WHERE id = $1 AND is_deleted = false
-            "#,
-            note_id
-        )
-        .fetch_optional(&self.pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Note not found".into()))?;
-
-        if note.last_edited_by != user_id {
-            // Check if user has access (for future collaboration features)
-            self.verify_note_ownership(note_id, user_id).await?;
-        }
-
-        let tags = self.get_note_tags(note_id).await?;
-        let active_users = self.get_active_users(note_id).await?;
-
-        Ok(NoteResponseEnhanced {
-            id: note.id,
-            title: note.title,
-            content: note.content,
-            last_edited_by: note.last_edited_by,
-            is_favorited: note.is_favorited,
-            is_archived: note.is_archived,
-            created_at: note.created_at,
-            updated_at: note.updated_at,
-            tags,
-            active_users,
         })
     }
 
@@ -503,8 +486,8 @@ impl NoteService {
             .map(|u| ActiveUserInfo {
                 user_id: u.user_id,
                 display_name: u.display_name,
-                cursor_line: u.cursor_line,
-                cursor_column: u.cursor_column,
+                cursor_line: u.cursor_line.unwrap_or(0),
+                cursor_column: u.cursor_column.unwrap_or(0),
             })
             .collect())
     }

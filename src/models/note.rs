@@ -12,20 +12,25 @@ pub struct Note {
     pub title: String,
     pub content: String,
     pub last_edited_by: Option<Uuid>,
+    pub is_favorited: bool,
+    pub is_archived: bool,
     pub is_deleted: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NoteResponse {
     pub id: Uuid,
     pub title: String,
     pub content: String,
     pub last_edited_by: Option<Uuid>,
+    pub is_favorited: bool,
+    pub is_archived: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub tags: Vec<String>,
+    pub active_users: Vec<ActiveUser>,
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -42,10 +47,12 @@ pub struct UpdateNoteRequest {
     pub content: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct NoteListResponse {
     pub notes: Vec<NoteResponse>,
-    pub total: i64,
+    pub total: i32,
+    pub page: i32,
+    pub limit: i32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,35 +86,10 @@ pub struct SearchResponse {
     pub query: String,
 }
 
-// Enhanced NoteResponse with additional fields
-#[derive(Debug, Serialize)]
-pub struct NoteResponseEnhanced {
-    pub id: Uuid,
-    pub title: String,
-    pub content: String,
-    pub last_edited_by: Uuid,
-    pub is_favorited: bool,
-    pub is_archived: bool,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-    pub tags: Vec<String>,
-    pub active_users: Vec<ActiveUserInfo>,
-}
-
 #[derive(Debug, Serialize)]
 pub struct ActiveUserInfo {
     pub user_id: Uuid,
     pub display_name: String,
     pub cursor_line: i32,
     pub cursor_column: i32,
-}
-
-// Enhanced list response with pagination metadata
-#[derive(Debug, Serialize)]
-pub struct NoteListResponseEnhanced {
-    pub notes: Vec<NoteResponseEnhanced>,
-    pub total: i64,
-    pub page: i64,
-    pub per_page: i64,
-    pub total_pages: i64,
 }
