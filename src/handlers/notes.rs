@@ -1,15 +1,17 @@
-use axum::{
-    extract::{State, Path, Query},
-    http::StatusCode,
-    Extension,
-    Json,
+// src/handlers/notes.rs
+use crate::models::note::{
+    CreateNoteRequest, NoteListResponse, NoteQueryParams, NoteResponse, UpdateNoteRequest,
 };
-use uuid::Uuid;
-use std::sync::Arc;
-use crate::models::note::{CreateNoteRequest, UpdateNoteRequest, NoteResponse, NoteListResponse, NoteQueryParams};
 use crate::models::user::User;
 use crate::services::NoteService;
 use crate::utils::errors::Result;
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    Extension, Json,
+};
+use std::sync::Arc;
+use uuid::Uuid;
 
 pub async fn create_note(
     State(note_service): State<Arc<NoteService>>,
@@ -55,4 +57,44 @@ pub async fn delete_note(
 ) -> Result<StatusCode> {
     note_service.delete(note_id, user.id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/v1/notes/:id/favorite
+pub async fn toggle_favorite(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Path(note_id): Path<Uuid>,
+) -> Result<Json<NoteResponseEnhanced>> {
+    let note = note_service.toggle_favorite(note_id, user.id).await?;
+    Ok(Json(note))
+}
+
+/// POST /api/v1/notes/:id/archive
+pub async fn toggle_archive(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Path(note_id): Path<Uuid>,
+) -> Result<Json<NoteResponseEnhanced>> {
+    let note = note_service.toggle_archive(note_id, user.id).await?;
+    Ok(Json(note))
+}
+
+/// GET /api/v1/search
+pub async fn search(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Query(params): Query<SearchParams>,
+) -> Result<Json<SearchResponse>> {
+    let results = note_service.search(user.id, params).await?;
+    Ok(Json(results))
+}
+
+/// GET /api/v1/notes - Enhanced with filters
+pub async fn list_notes_filtered(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Query(params): Query<NoteFilterParams>,
+) -> Result<Json<NoteListResponseEnhanced>> {
+    let notes = note_service.list_filtered(user.id, params).await?;
+    Ok(Json(notes))
 }

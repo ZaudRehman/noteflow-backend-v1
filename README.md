@@ -14,8 +14,8 @@
 
 ## 📖 Table of Contents
 
-- [About The Project](#-about-the-project)
-- [Key Features](#-key-features)
+- [About](#-about-the-project)
+- [Features](#-key-features)
 - [Tech Stack](#️-tech-stack)
 - [Architecture](#️-architecture)
 - [Getting Started](#-getting-started)
@@ -66,19 +66,41 @@ This project showcases mastery of critical backend engineering competencies:
 ## ✨ Key Features
 
 ### Authentication & Authorization
-- **JWT Token System** - Dual token approach with access (24h) and refresh (7d) tokens
+- **JWT Token System** - Dual token approach with access (1h) and refresh (30d) tokens
 - **Secure Password Storage** - Bcrypt hashing with configurable cost factor
 - **Token Refresh Flow** - Seamless token renewal without re-authentication
 - **User Management** - Registration, login, and session management
 
 ### Note Management
 - **Full CRUD Operations** - Create, read, update, delete with ownership verification
-- **Soft Delete** - Notes marked as deleted but recoverable
+- **Favorites & Archive** - Mark important notes and archive old ones
+- **Soft Delete** - 30-day recovery window for deleted notes
+- **Advanced Filtering** - Filter by favorite, archive, tags, search query
 - **Pagination** - Efficient data retrieval with configurable page sizes
-- **Tag Filtering** - Filter notes by assigned tags
-- **Rich Metadata** - Titles, content, timestamps, last editor tracking
-- **User Limits** - Configurable maximum notes per user (default: 50)
-- **Content Validation** - Maximum note size enforcement (default: 100KB)
+- **Sorting** - Sort by created, updated, or title with ASC/DESC
+- **Content Limits** - Configurable max size (100KB) and notes per user (500)
+
+### Tag System
+- **Custom Tags** - User-specific tags with unique names
+- **Many-to-Many Relations** - Multiple tags per note, multiple notes per tag
+- **Tag CRUD** - Create, update, delete tags independently
+- **Tag Statistics** - View note counts per tag
+- **Batch Operations** - Add/remove tags from notes
+- **Tag-Based Filtering** - List all notes with specific tag
+
+### Search & Discovery
+- **Full-Text Search** - PostgreSQL GIN indexes for fast content search
+- **Multi-Field Search** - Search across titles and content
+- **Ranking** - Results ranked by relevance (title match > content match)
+- **Fuzzy Matching** - ILIKE queries for partial matches
+- **Real-Time Results** - Sub-second search response times
+
+### User Management
+- **Profile Customization** - Update display name and avatar
+- **Theme Settings** - Light/dark/auto theme preferences
+- **Custom Preferences** - JSONB field for arbitrary user settings
+- **Last Login Tracking** - Monitor user activity
+- **Account Security** - Password change and reset flows
 
 ### Version History
 - **Automatic Revisions** - PostgreSQL triggers create snapshots on content changes
@@ -86,19 +108,13 @@ This project showcases mastery of critical backend engineering competencies:
 - **Point-in-Time Restore** - Revert notes to any previous version
 - **Change Tracking** - Author and timestamp for every revision
 
-### Organization System
-- **Custom Tags** - User-specific tags for categorization
-- **Many-to-Many Relations** - Multiple tags per note, multiple notes per tag
-- **Tag Management** - Create, update, delete tags independently
-- **Tag Statistics** - View note counts per tag
-- **Deduplication** - Unique constraint prevents duplicate tags
-
-### Real-Time Collaboration (Ready)
-- **WebSocket Infrastructure** - Real-time message broadcasting
-- **Redis Pub/Sub** - Multi-instance synchronization
-- **Session Tracking** - Active user presence monitoring
-- **Connection Management** - Automatic cleanup of stale sessions
-- **Message Types** - Edit, cursor move, user join/leave events
+### Real-Time Collaboration
+- **WebSocket Infrastructure** - Persistent connections for instant updates
+- **Active User Presence** - See who's currently editing a note
+- **Cursor Tracking** - View collaborator cursor positions in real-time
+- **Multi-Instance Sync** - Redis pub/sub broadcasts across servers
+- **Connection Management** - Auto-cleanup of stale sessions
+- **Message Types** - Note updates, cursor moves, user join/leave events
 
 ### Security & Performance
 - **Rate Limiting** - IP-based throttling (20/min anonymous, 100/min authenticated)
@@ -119,7 +135,7 @@ This project showcases mastery of critical backend engineering competencies:
 - **[Tower](https://github.com/tower-rs/tower)** - Middleware and service abstractions
 - **[Tower-HTTP](https://github.com/tower-rs/tower-http)** - CORS, compression, tracing middleware
 
-### Database & Storage
+### Database & Caching
 - **[PostgreSQL](https://www.postgresql.org/)** 15+ - Relational database with ACID guarantees
 - **[SQLx](https://github.com/launchbadge/sqlx)** 0.7 - Async SQL toolkit with compile-time verification
 - **[Redis](https://redis.io/)** 7+ - In-memory data store for caching and pub/sub
@@ -131,6 +147,8 @@ This project showcases mastery of critical backend engineering competencies:
 - **[bcrypt](https://github.com/Keats/rust-bcrypt)** - Password hashing with salt rounds
 - **[uuid](https://github.com/uuid-rs/uuid)** - Universally unique identifiers
 - **[validator](https://github.com/Keats/validator)** - Struct validation with derive macros
+- **[sha2](https://github.com/RustCrypto/hashes)** - Token hashing
+- **[rand](https://github.com/rust-random/rand)** - Secure random generation
 
 ### Serialization & Validation
 - **[Serde](https://serde.rs/)** - Serialization framework for JSON/YAML/TOML
@@ -145,7 +163,7 @@ This project showcases mastery of critical backend engineering competencies:
 ### DevOps & Deployment
 - **[Docker](https://www.docker.com/)** - Containerization with multi-stage builds
 - **[Docker Compose](https://docs.docker.com/compose/)** - Local development orchestration
-- **GitHub Actions** - Automated CI/CD pipeline
+- **GitHub Actions** - CI/CD pipeline
 
 ---
 
@@ -173,11 +191,11 @@ NoteFlow Backend follows a **clean layered architecture** inspired by Domain-Dri
 │  └─ WebSocket Handler       (real-time messaging)           │
 ├─────────────────────────────────────────────────────────────┤
 │  Business Logic Layer (Services)                            │
-│  ├─ AuthService             (user authentication)           │
+│  ├─ AuthService             (authentication & tokens)       │
 │  ├─ NoteService             (note operations)               │
-│  ├─ RevisionService         (version control)               │
+│  ├─ UserService             (user management)               │
 │  ├─ TagService              (tagging system)                │
-│  └─ WebSocketService        (real-time sync)                │
+│  └─ CollaborationService        (real-time sync)            │
 ├─────────────────────────────────────────────────────────────┤
 │  Data Access Layer                                          │
 │  ├─ SQLx Queries            (parameterized SQL)             │
@@ -231,8 +249,8 @@ Ensure you have these installed:
 
 #### 1. **Clone the repository**
 ```bash
-git clone https://github.com/ZaudRehman/noteflow-backend.git
-cd noteflow-backend
+git clone https://github.com/ZaudRehman/noteflow-backend-v1.git
+cd noteflow-backend-v1
 ```
 
 #### 2. **Install SQLx CLI**
@@ -335,44 +353,66 @@ Authorization: Bearer <access_token>
 
 ### Endpoints Overview
 
-#### Authentication
+#### Authentication (Public)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/auth/register` | Register new user |
-| `POST` | `/auth/login` | Login and receive tokens |
-| `POST` | `/auth/refresh` | Refresh access token |
+| `POST` | `/api/v1/auth/register` | Register new user (also stores refresh token) |
+| `POST` | `/api/v1/auth/login` | Login (stores refresh token, updates last_login) |
+| `POST` | `/api/v1/auth/refresh` | Refresh access token |
+| `POST` | `/api/v1/auth/forgot-password` | Request password reset email |
+| `POST` | `/api/v1/auth/reset-password` | Reset password with token |
 
-#### Notes
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/notes` | List all notes with pagination |
-| `POST` | `/notes` | Create new note |
-| `GET` | `/notes/:id` | Get specific note |
-| `PUT` | `/notes/:id` | Update note |
-| `DELETE` | `/notes/:id` | Soft delete note |
-
-#### Revisions
+#### Authentication (Protected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/notes/:id/revisions` | List note revision history |
-| `POST` | `/notes/:note_id/revisions/:revision_id/restore` | Restore to previous version |
+| `GET` | `/api/v1/auth/me` | Get current user profile |
+| `POST` | `/api/v1/auth/logout` | Revoke refresh token |
+
+#### Notes (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/notes` | List notes (filters: favorites/archived/all) |
+| `POST` | `/api/v1/notes` | Create new note |
+| `GET` | `/api/v1/notes/:id` | Get specific note with tags |
+| `PUT` | `/api/v1/notes/:id` | Update note |
+| `DELETE` | `/api/v1/notes/:id` | Soft delete note |
+| `POST` | `/api/v1/notes/:id/favorite` | Toggle favorite status |
+| `POST` | `/api/v1/notes/:id/archive` | Toggle archive status |
 
 #### Tags
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/tags` | List all tags |
-| `POST` | `/tags` | Create new tag |
-| `POST` | `/notes/:id/tags` | Add tags to note |
+| `GET` | `/api/v1/tags` | List all user tags with note counts |
+| `POST` | `/api/v1/tags` | Create new tag |
+| `PUT` | `/api/v1/tags/:id` | Update tag name |
+| `DELETE` | `/api/v1/tags/:id` | Delete tag |
+| `GET` | `/api/v1/tags/:id/notes` | Get all notes with this tag |
+| `POST` | `/api/v1/notes/:note_id/tags` | Add tag to note |
+| `DELETE` | `/api/v1/notes/:note_id/tags/:tag_id` | Remove tag from note |
 
-#### WebSocket
+#### User Profile (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/users/profile` | Get user profile |
+| `PUT` | `/api/v1/users/profile` | Update profile (name, avatar) |
+| `PUT` | `/api/v1/users/preferences` | Update preferences (theme, custom JSON) |
+
+#### Search (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/search?q=query` | Full-text search across notes |
+
+#### WebSocket (Protected)
 
 | Protocol | Endpoint | Description |
 |----------|----------|-------------|
-| `WS` | `/ws/:note_id` | Real-time collaboration |
+| `WS` | `/api/v1/notes/:id/ws` | Real-time collaboration |
 
 #### Health Check
 
@@ -403,58 +443,61 @@ Authorization: Bearer <access_token>
 ### Entity Relationship Diagram
 
 ```
-                    ┌─────────────────────────┐
-                    │         users           │
-                    ├─────────────────────────┤
-                    │ id (PK, UUID)           │
-                    │ email (UNIQUE)          │
-                    │ password_hash           │
-                    │ display_name            │
-                    │ created_at              │
-                    │ updated_at              │
-                    └────────┬────────────────┘
+                    ┌──────────────────────────┐
+                    │         users            │
+                    ├──────────────────────────┤
+                    │ id (PK, UUID)            │
+                    │ email (UNIQUE)           │
+                    │ password_hash            │
+                    │ display_name             │
+                    │ avatar_url               │
+                    │ theme                    │
+                    │ preferences (JSONB)      │
+                    │ reset_token              │
+                    │ reset_token_expires      │
+                    │ last_login_at            │
+                    │ created_at               │
+                    │ updated_at               │
+                    └────────┬─────────────────┘
                              │
-                             │ 1:N
-                   ┌─────────┴─────────┐
-                   │                   │
-                   ▼                   ▼
-        ┌──────────────────┐  ┌──────────────────┐
-        │      notes       │  │      tags        │
-        ├──────────────────┤  ├──────────────────┤
-        │ id (PK)          │  │ id (PK)          │
-        │ user_id (FK)     │  │ user_id (FK)     │
-        │ title            │  │ name (UNIQUE)    │
-        │ content          │  │ created_at       │
-        │ last_edited_by   │  └────────┬─────────┘
-        │ is_deleted       │           │
-        │ created_at       │           │ N:M
-        │ updated_at       │           │
-        └────────┬─────────┘           │
-                 │                     │
-                 │ 1:N          ┌──────┴──────────┐
-                 │              │   note_tags     │
-                 │              ├─────────────────┤
-                 ▼              │ note_id (FK)    │
-        ┌──────────────────┐    │ tag_id (FK)     │
-        │    revisions     │    │ created_at      │
-        ├──────────────────┤    └─────────────────┘
-        │ id (PK)          │
-        │ note_id (FK)     │
-        │ content          │
-        │ created_by (FK)  │
-        │ created_at       │
-        └──────────────────┘
+                             │ 1:N 
+              ┌──────────────┼──────────────┬──────────────┐
+              │              │              │              │
+              ▼              ▼              ▼              ▼
+    ┌─────────────────┐ ┌─────────────┐ ┌──────────────┐ ┌──────────────────┐
+    │     notes       │ │    tags     │ │  revisions   │ │ refresh_tokens   │
+    ├─────────────────┤ ├─────────────┤ ├──────────────┤ ├──────────────────┤
+    │ id (PK)         │ │ id (PK)     │ │ id (PK)      │ │ id (PK)          │
+    │ user_id (FK)    │ │ user_id(FK) │ │ note_id (FK) │ │ user_id (FK)     │
+    │ title           │ │ name        │ │ content      │ │ token_hash       │
+    │ content         │ │ created_at  │ │ created_by   │ │ expires_at       │
+    │ is_favorited    │ └──────┬──────┘ │ created_at   │ │ revoked          │
+    │ is_archived     │        │        └──────────────┘ │ revoked_at       │
+    │ is_deleted      │        │                         │ user_agent       │
+    │ last_edited_by  │        │ N:M                     │ ip_address       │
+    │ created_at      │        │                         │ created_at       │
+    │ updated_at      │   ┌────┴─────────┐               └──────────────────┘
+    └────────┬────────┘   │  note_tags   │
+             │            ├──────────────┤
+             │            │ note_id (FK) │
+             │            │ tag_id (FK)  │
+             │            │ created_at   │
+             │            └──────────────┘
+             │ 1:N 
+             │
+             ▼
+    ┌──────────────────┐
+    │ active_sessions  │
+    ├──────────────────┤
+    │ id (PK)          │
+    │ note_id (FK)     │
+    │ user_id (FK)     │
+    │ cursor_line      │
+    │ cursor_column    │
+    │ last_seen_at     │
+    │ created_at       │
+    └──────────────────┘
 
-        ┌──────────────────────┐
-        │  active_sessions     │
-        ├──────────────────────┤
-        │ id (PK)              │
-        │ user_id (FK)         │
-        │ note_id (FK)         │
-        │ connection_id        │
-        │ last_active          │
-        │ created_at           │
-        └──────────────────────┘
 ```
 
 ### Table Definitions
@@ -462,34 +505,49 @@ Authorization: Bearer <access_token>
 #### Users Table
 ```sql
 CREATE TABLE users (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    email VARCHAR(255) UNIQUE NOT NULL,
-    password_hash VARCHAR(255) NOT NULL,
-    display_name VARCHAR(100) NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+email VARCHAR(255) UNIQUE NOT NULL,
+password_hash VARCHAR(255) NOT NULL,
+display_name VARCHAR(100) NOT NULL,
+avatar_url TEXT,
+theme VARCHAR(20) DEFAULT 'light' CHECK (theme IN ('light', 'dark', 'auto')),
+preferences JSONB DEFAULT '{}'::jsonb,
+reset_token VARCHAR(64),
+reset_token_expires TIMESTAMPTZ,
+last_login_at TIMESTAMPTZ,
+created_at TIMESTAMPTZ DEFAULT NOW(),
+updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_reset_token ON users(reset_token) WHERE reset_token IS NOT NULL;
+CREATE INDEX idx_users_preferences ON users USING GIN(preferences);
 ```
 
 #### Notes Table
 ```sql
 CREATE TABLE notes (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    title VARCHAR(255) NOT NULL DEFAULT 'Untitled',
-    content TEXT NOT NULL DEFAULT '',
-    last_edited_by UUID REFERENCES users(id),
-    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+title VARCHAR(255) NOT NULL DEFAULT 'Untitled',
+content TEXT NOT NULL DEFAULT '',
+last_edited_by UUID REFERENCES users(id),
+is_favorited BOOLEAN NOT NULL DEFAULT FALSE,
+is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+created_at TIMESTAMPTZ DEFAULT NOW(),
+updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Performance indexes
 CREATE INDEX idx_notes_user_id ON notes(user_id);
-CREATE INDEX idx_notes_user_created ON notes(user_id, created_at DESC);
-CREATE INDEX idx_notes_updated_at ON notes(updated_at DESC);
+CREATE INDEX idx_notes_user_filters ON notes(user_id, is_deleted, is_archived, is_favorited, updated_at DESC);
+CREATE INDEX idx_notes_user_favorited ON notes(user_id, updated_at DESC) WHERE is_favorited = true;
+CREATE INDEX idx_notes_user_archived ON notes(user_id, updated_at DESC) WHERE is_archived = true;
+
+-- Full-text search
 CREATE INDEX idx_notes_content_search ON notes USING GIN (to_tsvector('english', content));
+CREATE INDEX idx_notes_title_search ON notes USING GIN (to_tsvector('english', title));
 ```
 
 #### Revisions Table
@@ -529,6 +587,42 @@ CREATE TABLE note_tags (
 );
 ```
 
+#### Refresh Tokens
+```sql
+CREATE TABLE refresh_tokens (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+token_hash VARCHAR(64) NOT NULL UNIQUE,
+expires_at TIMESTAMPTZ NOT NULL,
+revoked BOOLEAN NOT NULL DEFAULT FALSE,
+revoked_at TIMESTAMPTZ,
+user_agent TEXT,
+ip_address INET,
+created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX idx_refresh_tokens_hash ON refresh_tokens(token_hash) WHERE NOT revoked;
+CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at) WHERE NOT revoked;
+```
+
+#### Active Sessions
+```sql
+CREATE TABLE active_sessions (
+id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+note_id UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+cursor_line INTEGER NOT NULL DEFAULT 0,
+cursor_column INTEGER NOT NULL DEFAULT 0,
+last_seen_at TIMESTAMPTZ DEFAULT NOW(),
+created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_active_sessions_note_id ON active_sessions(note_id);
+CREATE INDEX idx_active_sessions_user_id ON active_sessions(user_id);
+WHERE last_seen_at > NOW() - INTERVAL '5 minutes';
+```
+
 ### Database Optimizations
 
 - **Composite Indexes** - Fast user-specific queries
@@ -546,48 +640,59 @@ CREATE TABLE note_tags (
 ### Connection Flow
 
 ```rust
-// Client connects
-WebSocket /ws/{note_id}
-Authorization: Bearer <token>
+Client connects: ws://api/v1/notes/{note_id}/ws
+└─ Authorization: Bearer <token>
 
-// Server verifies token and creates session
-→ Insert into active_sessions
+Server verifies JWT and note access
+└─ Creates active_session record
 
-// Client sends edit
-→ Broadcast to all connections on this note
-→ Publish to Redis (for other instances)
+Client sends cursor moves or edits
+└─ Broadcast to all connections for this note
+└─ Publish to Redis for other instances
 
-// Client disconnects
-→ Remove from active_sessions
-→ Broadcast user_left event
+Client receives updates from other users
+└─ Update UI with changes and cursor positions
+
+Client disconnects
+└─ Delete active_session record
+└─ Broadcast "user_left" event
 ```
 
 ### Message Types
 
 ```typescript
-// Edit message
+// Cursor movement
 {
-  "message_type": "edit",
-  "note_id": "uuid",
-  "user_id": "uuid",
-  "content": "updated content",
-  "timestamp": "2025-12-08T..."
+"type": "cursor:move",
+"note_id": "uuid",
+"user_id": "uuid",
+"user_name": "John Doe",
+"position": { "line": 5, "column": 12 },
+"timestamp": "2025-12-13T..."
 }
 
-// Cursor move
+// Note update
 {
-  "message_type": "cursor_move",
-  "note_id": "uuid",
-  "user_id": "uuid",
-  "position": { "line": 5, "column": 12 }
+"type": "note:updated",
+"note_id": "uuid",
+"user_id": "uuid",
+"content_delta": "new text",
+"timestamp": "2025-12-13T..."
 }
 
 // User joined
 {
-  "message_type": "user_joined",
-  "note_id": "uuid",
-  "user_id": "uuid",
-  "display_name": "John Doe"
+"type": "user:joined",
+"note_id": "uuid",
+"user_id": "uuid",
+"user_name": "Jane Smith",
+"timestamp": "2025-12-13T..."
+}
+
+// Ping/Pong (keepalive)
+{
+"type": "ping",
+"timestamp": "2025-12-13T..."
 }
 ```
 
@@ -665,6 +770,8 @@ docker run -p 8080:8080 --env-file .env noteflow-backend
 DATABASE_URL=<supabase-connection-string>
 REDIS_URL=<upstash-connection-string>
 JWT_SECRET=<secure-random-key>
+JWT_ACCESS_EXPIRATION=3600
+JWT_REFRESH_EXPIRATION=2592000
 RUST_LOG=info
 MAX_NOTE_SIZE=102400
 MAX_NOTES_PER_USER=50
@@ -678,19 +785,23 @@ RATE_LIMIT_AUTHENTICATED=100
 
 ```
 noteflow-backend/
-├── 📄 Cargo.toml                    # Rust dependencies
+├── 📄 Cargo.toml                     # Rust dependencies
 ├── 📄 .env.example                   # Environment template
 ├── 📄 Dockerfile                     # Container build
 ├── 📄 docker-compose.yml             # Local dev stack
 ├── 📄 README.md                      # This file
-├── 📄 DEPLOYMENT.md                  # Deployment guide
+├── 📄 LICENSE                        # MIT License
 │
 ├── 📁 migrations/                    # Database migrations
-│   ├── 20251208_001_create_users.sql
-│   ├── 20251208_002_create_notes.sql
-│   ├── 20251208_003_create_revisions.sql
-│   ├── 20251208_004_create_tags.sql
-│   └── 20251208_005_create_active_sessions.sql
+│   ├── 20251208000001_create_users.sql
+│   ├── 20251208000002_create_notes.sql
+│   ├── 20251208000003_create_revisions.sql
+│   ├── 20251208000004_create_tags.sql
+│   ├── 20251208000005_create_active_sessions.sql
+│   ├── 20251213000006_enhance_notes.sql
+│   ├── 20251213000007_enhance_users.sql
+│   ├── 20251213000008_create_refresh_tokens.sql
+│   └── 20251213000009_fix_active_sessions.sql
 │
 └── 📁 src/
     ├── 📄 main.rs                    # Application entry
@@ -709,7 +820,8 @@ noteflow-backend/
     │   ├── note.rs                   # Note model
     │   ├── revision.rs               # Revision model
     │   ├── tag.rs                    # Tag model
-    │   └── session.rs                # WebSocket model
+    │   ├── session.rs                # Active session mode
+    │   └── collaboration.rs          # WebSocket message types
     │
     ├── 📁 db/                        # Database layer
     │   ├── mod.rs
@@ -719,12 +831,19 @@ noteflow-backend/
     ├── 📁 services/                  # Business logic
     │   ├── mod.rs
     │   ├── auth_service.rs           # Authentication
-    │   └── note_service.rs           # Note operations
+    │   ├── note_service.rs           # Note operations
+    │   ├── tag_service.rs            # Tag management
+    │   ├── user_service.rs           # User profile management
+    │   └── collaboration_service.rs  # Real-time collaboration
     │
     ├── 📁 handlers/                  # HTTP handlers
     │   ├── mod.rs
     │   ├── auth.rs                   # Auth endpoints
-    │   └── notes.rs                  # Note endpoints
+    │   ├── notes.rs                  # Note endpoints
+    │   ├── tags.rs                   # Tag management endpoints
+    │   ├── users.rs                  # User profile endpoints
+    │   ├── search.rs                 # Search endpoint
+    │   └── websocket.rs              # WebSocket handler
     │
     └── 📁 middleware/                # Middleware
         ├── mod.rs
@@ -797,7 +916,7 @@ Distributed under the [**MIT License**](LICENSE). See `LICENSE` file for more in
 
 ## 📧 Contact
 
-**Zaud Rehman** - [@RehmanZaud](https://x.com/RehmanZaud) · [LinkedIn](https://www.linkedin.com/in/zaud-rehman-31514a288/)· zaudrehman@gmail.com
+**Zaud Rehman** - [@RehmanZaud](https://x.com/RehmanZaud) · [LinkedIn](https://www.linkedin.com/in/zaud-rehman-31514a288/) · zaudrehman@gmail.com
 
 **Project Link**: [https://github.com/ZaudRehman/noteflow-backend-v1](https://github.com/ZaudRehman/noteflow-backend-v1)
 

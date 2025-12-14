@@ -20,6 +20,8 @@ redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "tok
 jsonwebtoken = "9.2"
 bcrypt = "0.15"
 uuid = { version = "1.6", features = ["v4", "serde"] }
+sha2 = "0.10"
+rand = "0.8"
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }

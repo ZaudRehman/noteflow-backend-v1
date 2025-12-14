@@ -1,3 +1,4 @@
+// src/models/user.rs
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -59,4 +60,64 @@ pub struct AuthResponse {
 #[derive(Debug, Deserialize)]
 pub struct RefreshTokenRequest {
     pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UserProfile {
+    pub id: Uuid,
+    pub email: String,
+    pub display_name: String,
+    pub avatar_url: Option<String>,
+    pub theme: String,
+    pub preferences: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub last_login_at: Option<DateTime<Utc>>,
+}
+
+impl From<User> for UserProfile {
+    fn from(user: User) -> Self {
+        Self {
+            id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            avatar_url: None, // Will be populated from DB query
+            theme: "light".to_string(),
+            preferences: serde_json::json!({}),
+            created_at: user.created_at,
+            last_login_at: None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateProfileRequest {
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdatePreferencesRequest {
+    pub theme: Option<String>,
+    pub preferences: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LogoutRequest {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LogoutResponse {
+    pub message: String,
 }
