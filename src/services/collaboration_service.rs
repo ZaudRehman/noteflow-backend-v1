@@ -56,6 +56,7 @@ impl CollaborationService {
         // Spawn task to forward broadcast messages to this WebSocket
         let user_id = user.id;
         let sender_task = tokio::spawn(async move {
+            let mut sender = sender;
             while let Ok(msg) = rx.recv().await {
                 // Filter messages for this note and don't echo user's own cursor moves
                 let should_send = match &msg {

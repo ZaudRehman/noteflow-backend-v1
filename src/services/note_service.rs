@@ -163,7 +163,7 @@ impl NoteService {
             notes: responses,
             total,
             page,
-            per_page: limit,
+            limit,
         })
     }
 
@@ -350,7 +350,7 @@ impl NoteService {
             notes: responses,
             total,
             page,
-            per_page: limit,
+            limit,
         })
     }
 

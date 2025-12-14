@@ -50,9 +50,9 @@ pub struct UpdateNoteRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct NoteListResponse {
     pub notes: Vec<NoteResponse>,
-    pub total: i32,
-    pub page: i32,
-    pub limit: i32,
+    pub total: i64,
+    pub page: i64,
+    pub limit: i64,
 }
 
 #[derive(Debug, Deserialize)]

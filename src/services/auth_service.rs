@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
+use chrono::Utc;
 
 pub struct AuthService {
     pool: PgPool,

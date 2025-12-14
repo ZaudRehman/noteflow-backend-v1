@@ -14,13 +14,6 @@ pub struct ActiveSession {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct ActiveUserInfo {
-    pub user_id: Uuid,
-    pub display_name: String,
-    pub connection_id: String,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WebSocketMessage {
     pub message_type: MessageType,
