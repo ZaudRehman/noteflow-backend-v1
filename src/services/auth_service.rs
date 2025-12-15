@@ -1,5 +1,5 @@
 // src/services/auth_service.rs
-use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, User};
+use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, User, UserProfile};
 use crate::utils::{
     errors::{AppError, Result},
     jwt::JwtManager,
@@ -11,6 +11,8 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 use chrono::Utc;
+use chrono::{DateTime, Utc};
+
 
 pub struct AuthService {
     pool: PgPool,

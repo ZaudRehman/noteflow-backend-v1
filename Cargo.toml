@@ -13,7 +13,7 @@ tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"]
 
 # Database
 # sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-rustls", "uuid", "chrono", "migrate"] }
-sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "uuid", "chrono", "migrate"] }
+sqlx = { version = "0.7", features = ["postgres", "runtime-tokio-native-tls", "uuid", "chrono", "migrate", "ipnetwork"] }
 redis = { version = "0.24", features = ["tokio-comp", "connection-manager", "tokio-rustls-comp"] }
 
 # Authentication & Security

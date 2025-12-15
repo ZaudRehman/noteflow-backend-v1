@@ -1,14 +1,15 @@
 // src/models/mod.rs
-pub mod user;
+pub mod collaboration;
 pub mod note;
 pub mod revision;
-pub mod tag;
 pub mod session;
-pub mod collaboration;
+pub mod tag;
+pub mod user;
 
-pub use user::*;
+
+pub use collaboration::{ActiveSession as CollabSession, WebSocketMessage, MessageType};
 pub use note::*;
 pub use revision::*;
+pub use session::{ActiveSession, ActiveUserInfo};
 pub use tag::*;
-pub use session::*;
-pub use collaboration::*;
+pub use user::*;

@@ -11,6 +11,12 @@ pub struct User {
     pub email: String,
     pub password_hash: String,
     pub display_name: String,
+    pub preferences: Option<serde_json::Value>,
+    pub theme: Option<String>,
+    pub avatar_url: Option<String>,
+    pub reset_token: Option<String>,
+    pub reset_token_expires: Option<DateTime<Utc>>,
+    pub last_login_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

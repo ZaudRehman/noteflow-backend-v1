@@ -1,6 +1,6 @@
 // src/services/tag_service.rs
 use crate::models::{
-    note::{NoteListResponseEnhanced, NoteResponseEnhanced},
+    note::{NoteListResponse, NoteResponse},
     tag::*,
 };
 use crate::utils::{

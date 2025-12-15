@@ -73,7 +73,12 @@ pub async fn auth_middleware(
     // Fetch user from database
     let user = sqlx::query_as!(
         User,
-        "SELECT * FROM users WHERE id = $1",
+        r#"SELECT 
+            id, email, password_hash, display_name, 
+            preferences, theme, avatar_url, 
+            reset_token, reset_token_expires, last_login_at,
+            created_at, updated_at 
+        FROM users WHERE id = $1"#,
         user_id
     )
     .fetch_optional(&pool)

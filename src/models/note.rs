@@ -30,7 +30,7 @@ pub struct NoteResponse {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub tags: Vec<String>,
-    pub active_users: Vec<ActiveUser>,
+    pub active_users: Vec<ActiveUserInfo>,
 }
 
 #[derive(Debug, Deserialize, Validate)]

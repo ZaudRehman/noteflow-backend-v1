@@ -1,7 +1,5 @@
 // src/handlers/notes.rs
-use crate::models::note::{
-    CreateNoteRequest, NoteListResponse, NoteQueryParams, NoteResponse, UpdateNoteRequest,
-};
+use crate::models::note::{ CreateNoteRequest, NoteListResponse, NoteQueryParams, NoteResponse, UpdateNoteRequest, NoteFilterParams, SearchParams, SearchResponse };
 use crate::models::user::User;
 use crate::services::NoteService;
 use crate::utils::errors::Result;
@@ -64,7 +62,7 @@ pub async fn toggle_favorite(
     State(note_service): State<Arc<NoteService>>,
     Extension(user): Extension<User>,
     Path(note_id): Path<Uuid>,
-) -> Result<Json<NoteResponseEnhanced>> {
+) -> Result<Json<NoteResponse>> {
     let note = note_service.toggle_favorite(note_id, user.id).await?;
     Ok(Json(note))
 }
@@ -74,7 +72,7 @@ pub async fn toggle_archive(
     State(note_service): State<Arc<NoteService>>,
     Extension(user): Extension<User>,
     Path(note_id): Path<Uuid>,
-) -> Result<Json<NoteResponseEnhanced>> {
+) -> Result<Json<NoteResponse>> {
     let note = note_service.toggle_archive(note_id, user.id).await?;
     Ok(Json(note))
 }
@@ -94,7 +92,7 @@ pub async fn list_notes_filtered(
     State(note_service): State<Arc<NoteService>>,
     Extension(user): Extension<User>,
     Query(params): Query<NoteFilterParams>,
-) -> Result<Json<NoteListResponseEnhanced>> {
+) -> Result<Json<NoteListResponse>> {
     let notes = note_service.list_filtered(user.id, params).await?;
     Ok(Json(notes))
 }

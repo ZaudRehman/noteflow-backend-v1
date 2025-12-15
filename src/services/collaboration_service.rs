@@ -35,7 +35,7 @@ impl CollaborationService {
 
         tracing::info!("User {} joined note {} collaboration", user.id, note_id);
 
-        let (mut sender, mut receiver) = ws.split();
+        let (sender, mut receiver) = ws.split();
         let mut rx = self.tx.subscribe();
 
         // Create active session
@@ -53,47 +53,66 @@ impl CollaborationService {
         };
         let _ = self.tx.send(join_msg);
 
-        // Spawn task to forward broadcast messages to this WebSocket
+        // Clone values needed for the spawned tasks
         let user_id = user.id;
+        let user_name = user.display_name.clone();
+        let service_clone = Arc::clone(&self);
+        
+        // Create channel for sending messages to WebSocket
+        let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+        
+        // Spawn task to forward broadcast messages to this WebSocket
         let sender_task = tokio::spawn(async move {
             let mut sender = sender;
-            while let Ok(msg) = rx.recv().await {
-                // Filter messages for this note and don't echo user's own cursor moves
-                let should_send = match &msg {
-                    WsMessage::CursorMove {
-                        note_id: msg_note_id,
-                        user_id: msg_user_id,
-                        ..
-                    } => *msg_note_id == note_id && *msg_user_id != user_id,
-                    WsMessage::NoteUpdated {
-                        note_id: msg_note_id,
-                        ..
-                    } => *msg_note_id == note_id,
-                    WsMessage::UserJoined {
-                        note_id: msg_note_id,
-                        user_id: msg_user_id,
-                        ..
-                    } => *msg_note_id == note_id && *msg_user_id != user_id,
-                    WsMessage::UserLeft {
-                        note_id: msg_note_id,
-                        ..
-                    } => *msg_note_id == note_id,
-                    _ => false,
-                };
-
-                if should_send {
-                    if let Ok(json) = serde_json::to_string(&msg) {
-                        if sender.send(Message::Text(json)).await.is_err() {
-                            break;
-                        }
-                    }
+            
+            // Forward messages from ws_rx to actual WebSocket
+            while let Some(msg) = ws_rx.recv().await {
+                if sender.send(msg).await.is_err() {
+                    break;
                 }
             }
         });
 
+        // Spawn task to receive broadcast messages and filter them
+        let broadcast_task = {
+            let ws_tx = ws_tx.clone();
+            tokio::spawn(async move {
+                while let Ok(msg) = rx.recv().await {
+                    // Filter messages for this note and don't echo user's own cursor moves
+                    let should_send = match &msg {
+                        WsMessage::CursorMove {
+                            note_id: msg_note_id,
+                            user_id: msg_user_id,
+                            ..
+                        } => *msg_note_id == note_id && *msg_user_id != user_id,
+                        WsMessage::NoteUpdated {
+                            note_id: msg_note_id,
+                            ..
+                        } => *msg_note_id == note_id,
+                        WsMessage::UserJoined {
+                            note_id: msg_note_id,
+                            user_id: msg_user_id,
+                            ..
+                        } => *msg_note_id == note_id && *msg_user_id != user_id,
+                        WsMessage::UserLeft {
+                            note_id: msg_note_id,
+                            ..
+                        } => *msg_note_id == note_id,
+                        _ => false,
+                    };
+
+                    if should_send {
+                        if let Ok(json) = serde_json::to_string(&msg) {
+                            if ws_tx.send(Message::Text(json)).is_err() {
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+        };
+
         // Handle incoming messages from this client
-        let service = Arc::clone(&self);
-        let user_clone = user.clone();
         while let Some(result) = receiver.next().await {
             match result {
                 Ok(Message::Text(text)) => {
@@ -101,10 +120,10 @@ impl CollaborationService {
                         match msg {
                             WsMessage::CursorMove { position, .. } => {
                                 // Update cursor position in database
-                                let _ = service
+                                let _ = service_clone
                                     .create_or_update_session(
                                         note_id,
-                                        user_clone.id,
+                                        user_id,
                                         position.line as i32,
                                         position.column as i32,
                                     )
@@ -113,23 +132,23 @@ impl CollaborationService {
                                 // Broadcast cursor position
                                 let broadcast_msg = WsMessage::CursorMove {
                                     note_id,
-                                    user_id: user_clone.id,
-                                    user_name: user_clone.display_name.clone(),
+                                    user_id,
+                                    user_name: user_name.clone(),
                                     position,
                                     timestamp: Utc::now(),
                                 };
-                                let _ = service.tx.send(broadcast_msg);
+                                let _ = service_clone.tx.send(broadcast_msg);
                             }
                             WsMessage::NoteUpdated { content_delta, .. } => {
                                 // Broadcast note update to other users
                                 let broadcast_msg = WsMessage::NoteUpdated {
                                     note_id,
-                                    user_id: user_clone.id,
+                                    user_id,
                                     title: None,
                                     content_delta,
                                     timestamp: Utc::now(),
                                 };
-                                let _ = service.tx.send(broadcast_msg);
+                                let _ = service_clone.tx.send(broadcast_msg);
                             }
                             WsMessage::Ping { .. } => {
                                 // Respond with pong
@@ -137,7 +156,7 @@ impl CollaborationService {
                                     timestamp: Utc::now(),
                                 };
                                 if let Ok(json) = serde_json::to_string(&pong) {
-                                    let _ = sender.send(Message::Text(json)).await;
+                                    let _ = ws_tx.send(Message::Text(json));
                                 }
                             }
                             _ => {
@@ -151,7 +170,7 @@ impl CollaborationService {
                     break;
                 }
                 Ok(Message::Ping(data)) => {
-                    let _ = sender.send(Message::Pong(data)).await;
+                    let _ = ws_tx.send(Message::Pong(data));
                 }
                 Err(e) => {
                     tracing::error!("WebSocket error: {}", e);
@@ -163,17 +182,18 @@ impl CollaborationService {
 
         // Cleanup on disconnect
         sender_task.abort();
+        broadcast_task.abort();
 
-        let _ = self.delete_session(note_id, user.id).await;
+        let _ = self.delete_session(note_id, user_id).await;
 
         let leave_msg = WsMessage::UserLeft {
             note_id,
-            user_id: user.id,
+            user_id,
             timestamp: Utc::now(),
         };
         let _ = self.tx.send(leave_msg);
 
-        tracing::info!("User {} left note {} collaboration", user.id, note_id);
+        tracing::info!("User {} left note {} collaboration", user_id, note_id);
     }
 
     async fn verify_note_access(&self, note_id: Uuid, user_id: Uuid) -> Result<()> {
