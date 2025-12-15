@@ -57,14 +57,14 @@ impl CollaborationService {
         let user_id = user.id;
         let user_name = user.display_name.clone();
         let service_clone = Arc::clone(&self);
-        
+
         // Create channel for sending messages to WebSocket
         let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
-        
+
         // Spawn task to forward broadcast messages to this WebSocket
         let sender_task = tokio::spawn(async move {
             let mut sender = sender;
-            
+
             // Forward messages from ws_rx to actual WebSocket
             while let Some(msg) = ws_rx.recv().await {
                 if sender.send(msg).await.is_err() {

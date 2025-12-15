@@ -7,9 +7,10 @@ pub mod tag;
 pub mod user;
 
 
-pub use collaboration::{ActiveSession as CollabSession, WebSocketMessage, MessageType};
-pub use note::*;
+pub use collaboration::ActiveSession as CollabSession;
 pub use revision::*;
-pub use session::{ActiveSession, ActiveUserInfo};
+pub use session::{WebSocketMessage, MessageType};
+pub use session::ActiveSession;
+pub use note::ActiveUserInfo;
 pub use tag::*;
 pub use user::*;

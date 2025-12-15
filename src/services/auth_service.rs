@@ -5,14 +5,12 @@ use crate::utils::{
     jwt::JwtManager,
     validation,
 };
+use chrono::{DateTime, Utc};
 use rand::Rng;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
-use chrono::Utc;
-use chrono::{DateTime, Utc};
-
 
 pub struct AuthService {
     pool: PgPool,
@@ -44,12 +42,26 @@ impl AuthService {
         let password_hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST)
             .map_err(|e| AppError::InternalError(format!("Password hashing failed: {}", e)))?;
 
-        // Create user
+        // Create user - SELECT all fields that match the User struct
         let user = sqlx::query_as!(
             User,
             r#"INSERT INTO users (email, password_hash, display_name)
                VALUES ($1, $2, $3)
-               RETURNING id, email, password_hash, display_name, created_at, updated_at"#,
+               RETURNING 
+                   id, 
+                   email, 
+                   password_hash, 
+                   display_name, 
+                   avatar_url,
+                   theme,
+                   preferences,
+                   created_at, 
+                   updated_at,
+                   last_login_at,
+                   is_verified,
+                   verification_token,
+                   reset_token,
+                   reset_token_expires"#,
             email,
             password_hash,
             display_name
@@ -75,11 +87,31 @@ impl AuthService {
     pub async fn login(&self, req: LoginRequest) -> Result<AuthResponse> {
         let email = validation::sanitize_string(&req.email).to_lowercase();
 
-        // Fetch user
-        let user = sqlx::query_as!(User, "SELECT * FROM users WHERE email = $1", email)
-            .fetch_optional(&self.pool)
-            .await?
-            .ok_or_else(|| AppError::AuthenticationError("Invalid credentials".to_string()))?;
+        // Fetch user - explicitly list all columns
+        let user = sqlx::query_as!(
+            User,
+            r#"SELECT 
+                id, 
+                email, 
+                password_hash, 
+                display_name, 
+                avatar_url,
+                theme,
+                preferences,
+                created_at, 
+                updated_at,
+                last_login_at,
+                is_verified,
+                verification_token,
+                reset_token,
+                reset_token_expires
+            FROM users 
+            WHERE email = $1"#,
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| AppError::AuthenticationError("Invalid credentials".to_string()))?;
 
         // Verify password
         let password_valid = bcrypt::verify(&req.password, &user.password_hash)
@@ -176,6 +208,14 @@ impl AuthService {
     ) -> Result<()> {
         let token_hash = self.hash_token(token);
 
+        // Convert IP address string to IpNetwork
+        let ip_network = ip_address.and_then(|ip_str| {
+            ip_str
+                .parse::<std::net::IpAddr>()
+                .ok()
+                .map(|ip| ipnetwork::IpNetwork::from(ip))
+        });
+
         sqlx::query!(
             r#"
             INSERT INTO refresh_tokens (user_id, token_hash, expires_at, user_agent, ip_address)
@@ -185,7 +225,7 @@ impl AuthService {
             token_hash,
             expires_at,
             user_agent,
-            ip_address.and_then(|ip| ip.parse::<std::net::IpAddr>().ok()),
+            ip_network as Option<ipnetwork::IpNetwork>,
         )
         .execute(&self.pool)
         .await?;

@@ -86,7 +86,7 @@ pub struct SearchResponse {
     pub query: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ActiveUserInfo {
     pub user_id: Uuid,
     pub display_name: String,

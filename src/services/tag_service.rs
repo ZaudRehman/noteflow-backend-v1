@@ -234,7 +234,7 @@ impl TagService {
         user_id: Uuid,
         page: i64,
         limit: i64,
-    ) -> Result<NoteListResponseEnhanced> {
+    ) -> Result<NoteListResponse> {
         // Verify tag ownership
         self.verify_tag_access(tag_id, user_id).await?;
 
@@ -280,7 +280,7 @@ impl TagService {
         for note in notes {
             let tags = self.get_note_tags(note.id).await?;
 
-            responses.push(NoteResponseEnhanced {
+            responses.push(NoteResponse {
                 id: note.id,
                 title: note.title,
                 content: note.content,
@@ -296,12 +296,11 @@ impl TagService {
 
         let total_pages = (total as f64 / limit as f64).ceil() as i64;
 
-        Ok(NoteListResponseEnhanced {
+        Ok(NoteListResponse {
             notes: responses,
             total,
             page,
-            per_page: limit,
-            total_pages,
+            limit,
         })
     }
 

@@ -227,11 +227,7 @@ impl NoteService {
     }
 
     /// Toggle favorite status
-    pub async fn toggle_favorite(
-        &self,
-        note_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<NoteResponse> {
+    pub async fn toggle_favorite(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
         // Verify ownership
         self.verify_note_ownership(note_id, user_id).await?;
 
@@ -246,11 +242,7 @@ impl NoteService {
     }
 
     /// Toggle archive status
-    pub async fn toggle_archive(
-        &self,
-        note_id: Uuid,
-        user_id: Uuid,
-    ) -> Result<NoteResponse> {
+    pub async fn toggle_archive(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
         self.verify_note_ownership(note_id, user_id).await?;
 
         sqlx::query!(
