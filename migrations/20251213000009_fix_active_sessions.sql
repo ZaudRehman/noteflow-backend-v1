@@ -18,7 +18,7 @@ CREATE TABLE active_sessions (
 -- Indexes for real-time queries
 CREATE INDEX idx_active_sessions_note_id ON active_sessions(note_id, last_seen_at DESC);
 CREATE INDEX idx_active_sessions_user_id ON active_sessions(user_id);
-CREATE INDEX idx_active_sessions_last_seen ON active_sessions(last_seen_at) WHERE last_seen_at > NOW() - INTERVAL '5 minutes';
+CREATE INDEX idx_active_sessions_last_seen ON active_sessions(last_seen_at);
 
 -- Auto-cleanup stale sessions (consider users inactive after 5 minutes)
 CREATE OR REPLACE FUNCTION cleanup_stale_sessions()

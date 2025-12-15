@@ -1,5 +1,5 @@
 // src/services/auth_service.rs
-use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, User, UserProfile};
+use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserProfile};
 use crate::utils::{
     errors::{AppError, Result},
     jwt::JwtManager,
@@ -8,9 +8,24 @@ use crate::utils::{
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use sqlx::PgPool;
+use sqlx::{PgPool, FromRow};
 use std::sync::Arc;
 use uuid::Uuid;
+use sqlx::types::ipnetwork::IpNetwork;
+
+#[derive(Debug, FromRow)]
+struct User {
+    id: Uuid,
+    email: String,
+    password_hash: String,
+    display_name: String,
+    avatar_url: Option<String>,
+    theme: Option<String>,
+    preferences: Option<serde_json::Value>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+    last_login_at: Option<DateTime<Utc>>,
+}
 
 pub struct AuthService {
     pool: PgPool,
@@ -42,9 +57,8 @@ impl AuthService {
         let password_hash = bcrypt::hash(&req.password, bcrypt::DEFAULT_COST)
             .map_err(|e| AppError::InternalError(format!("Password hashing failed: {}", e)))?;
 
-        // Create user - SELECT all fields that match the User struct
-        let user = sqlx::query_as!(
-            User,
+        // Create user - use query_as with explicit type binding
+        let user = sqlx::query_as::<_, User>(
             r#"INSERT INTO users (email, password_hash, display_name)
                VALUES ($1, $2, $3)
                RETURNING 
@@ -57,15 +71,11 @@ impl AuthService {
                    preferences,
                    created_at, 
                    updated_at,
-                   last_login_at,
-                   is_verified,
-                   verification_token,
-                   reset_token,
-                   reset_token_expires"#,
-            email,
-            password_hash,
-            display_name
+                   last_login_at"#
         )
+        .bind(&email)
+        .bind(&password_hash)
+        .bind(&display_name)
         .fetch_one(&self.pool)
         .await?;
 
@@ -78,7 +88,16 @@ impl AuthService {
             .generate_refresh_token(user.id, user.email.clone())?;
 
         Ok(AuthResponse {
-            user: user.into(),
+            user: UserProfile {
+                id: user.id,
+                email: user.email,
+                display_name: user.display_name,
+                avatar_url: user.avatar_url,
+                theme: user.theme.unwrap_or_else(|| "light".to_string()),
+                preferences: user.preferences.unwrap_or_else(|| serde_json::json!({})),
+                created_at: user.created_at,
+                last_login_at: user.last_login_at,
+            },
             access_token,
             refresh_token,
         })
@@ -87,9 +106,8 @@ impl AuthService {
     pub async fn login(&self, req: LoginRequest) -> Result<AuthResponse> {
         let email = validation::sanitize_string(&req.email).to_lowercase();
 
-        // Fetch user - explicitly list all columns
-        let user = sqlx::query_as!(
-            User,
+        // Fetch user - use query_as for dynamic queries
+        let user = sqlx::query_as::<_, User>(
             r#"SELECT 
                 id, 
                 email, 
@@ -100,15 +118,11 @@ impl AuthService {
                 preferences,
                 created_at, 
                 updated_at,
-                last_login_at,
-                is_verified,
-                verification_token,
-                reset_token,
-                reset_token_expires
+                last_login_at
             FROM users 
-            WHERE email = $1"#,
-            email
+            WHERE email = $1"#
         )
+        .bind(&email)
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| AppError::AuthenticationError("Invalid credentials".to_string()))?;
@@ -140,7 +154,16 @@ impl AuthService {
             .generate_refresh_token(user.id, user.email.clone())?;
 
         Ok(AuthResponse {
-            user: user.into(),
+            user: UserProfile {
+                id: user.id,
+                email: user.email,
+                display_name: user.display_name,
+                avatar_url: user.avatar_url,
+                theme: user.theme.unwrap_or_else(|| "light".to_string()),
+                preferences: user.preferences.unwrap_or_else(|| serde_json::json!({})),
+                created_at: user.created_at,
+                last_login_at: user.last_login_at,
+            },
             access_token,
             refresh_token,
         })
@@ -213,7 +236,7 @@ impl AuthService {
             ip_str
                 .parse::<std::net::IpAddr>()
                 .ok()
-                .map(|ip| ipnetwork::IpNetwork::from(ip))
+                .and_then(|ip| IpNetwork::new(ip, if ip.is_ipv4() { 32 } else { 128 }).ok())
         });
 
         sqlx::query!(
@@ -225,7 +248,7 @@ impl AuthService {
             token_hash,
             expires_at,
             user_agent,
-            ip_network as Option<ipnetwork::IpNetwork>,
+            ip_network as Option<IpNetwork>,
         )
         .execute(&self.pool)
         .await?;
