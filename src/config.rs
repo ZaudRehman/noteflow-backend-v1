@@ -15,10 +15,19 @@ pub struct Config {
     pub max_note_size: usize,
     pub max_notes_per_user: i64,
     pub max_collaborators_per_note: usize,
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self, env::VarError> {
+    pub fn from_env() -> Result<Self, Box<dyn std::error::Error>> {
+        // Parse CORS origins from comma-separated string
+        let cors_origins = env::var("CORS_ALLOWED_ORIGINS")
+            .unwrap_or_else(|_| "http://localhost:3000,http://localhost:5173".to_string())
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
         Ok(Self {
             host: env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string()),
             port: env::var("PORT")
@@ -60,6 +69,7 @@ impl Config {
                 .unwrap_or_else(|_| "10".to_string())
                 .parse()
                 .unwrap_or(10),
+            cors_allowed_origins: cors_origins,
         })
     }
 }

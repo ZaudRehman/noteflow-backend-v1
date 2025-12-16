@@ -1,5 +1,6 @@
 // src/main.rs 
 use axum::{
+    http::HeaderValue,
     middleware,
     routing::{delete, get, post, put},
     Router,
@@ -8,7 +9,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use tower_http::{
     compression::CompressionLayer,
-    cors::{Any, CorsLayer},
+    cors::CorsLayer,
     trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
 };
 use tracing::Level;
@@ -85,6 +86,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     start_cleanup_task(anonymous_limiter.clone());
     start_cleanup_task(auth_limiter.clone());
     tracing::info!("✅ Rate limiters initialized");
+
+    // Parse CORS allowed origins
+    let cors_origins: Vec<HeaderValue> = config
+        .cors_allowed_origins
+        .iter()
+        .filter_map(|origin| origin.parse::<HeaderValue>().ok())
+        .collect();
+    
+    tracing::info!("🌐 CORS allowed origins: {:?}", config.cors_allowed_origins);
 
     // === PUBLIC ROUTES ===
     let public_routes = Router::new()
@@ -169,10 +179,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = Router::new()
         .merge(public_routes)
         .merge(protected_routes)
-        // CORS
+        // CORS with specific origins
         .layer(
             CorsLayer::new()
-                .allow_origin(Any)
+                .allow_origin(cors_origins)
                 .allow_methods([
                     axum::http::Method::GET,
                     axum::http::Method::POST,
