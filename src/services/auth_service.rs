@@ -8,10 +8,10 @@ use crate::utils::{
 use chrono::{DateTime, Utc};
 use rand::Rng;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, FromRow};
+use sqlx::types::ipnetwork::IpNetwork;
+use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
-use sqlx::types::ipnetwork::IpNetwork;
 
 #[derive(Debug, FromRow)]
 struct User {
@@ -71,7 +71,7 @@ impl AuthService {
                    preferences,
                    created_at, 
                    updated_at,
-                   last_login_at"#
+                   last_login_at"#,
         )
         .bind(&email)
         .bind(&password_hash)
@@ -116,7 +116,7 @@ impl AuthService {
                 updated_at,
                 last_login_at
             FROM users 
-            WHERE email = $1"#
+            WHERE email = $1"#,
         )
         .bind(&email)
         .fetch_optional(&self.pool)

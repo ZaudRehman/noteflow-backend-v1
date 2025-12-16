@@ -115,7 +115,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/notes/:id", delete(handlers::notes::delete_note))
         .route("/api/v1/notes/:id/favorite", post(handlers::notes::toggle_favorite))
         .route("/api/v1/notes/:id/archive", post(handlers::notes::toggle_archive))
-        .route("/api/v1/notes/:id/ws", get(handlers::websocket::note_websocket_handler))
         .with_state(note_service);
 
     // === TAG ROUTES ===
