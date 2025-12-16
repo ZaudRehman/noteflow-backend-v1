@@ -19,7 +19,7 @@ pub async fn register(
     headers: HeaderMap,
     Json(req): Json<RegisterRequest>,
 ) -> Result<(StatusCode, Json<AuthResponse>)> {
-    let mut response = auth_service.register(req).await?;
+    let response = auth_service.register(req).await?;
 
     // Extract user agent and IP for token tracking
     let user_agent = headers
@@ -60,7 +60,7 @@ pub async fn login(
     headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<AuthResponse>> {
-    let mut response = auth_service.login(req).await?;
+    let response = auth_service.login(req).await?;
 
     // Extract user agent and IP for token tracking
     let user_agent = headers

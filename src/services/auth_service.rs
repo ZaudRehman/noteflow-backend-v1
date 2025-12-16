@@ -1,5 +1,6 @@
+use crate::models::UserResponse;
 // src/services/auth_service.rs
-use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserProfile};
+use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserProfile, UserResponse};
 use crate::utils::{
     errors::{AppError, Result},
     jwt::JwtManager,
@@ -88,15 +89,11 @@ impl AuthService {
             .generate_refresh_token(user.id, user.email.clone())?;
 
         Ok(AuthResponse {
-            user: UserProfile {
+            user: UserResponse {
                 id: user.id,
                 email: user.email,
                 display_name: user.display_name,
-                avatar_url: user.avatar_url,
-                theme: user.theme.unwrap_or_else(|| "light".to_string()),
-                preferences: user.preferences.unwrap_or_else(|| serde_json::json!({})),
                 created_at: user.created_at,
-                last_login_at: user.last_login_at,
             },
             access_token,
             refresh_token,

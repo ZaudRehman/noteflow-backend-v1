@@ -107,11 +107,10 @@ pub async fn optional_auth_middleware(
             if let Some(token) = auth_str.strip_prefix("Bearer ") {
                 if let Ok(claims) = jwt_manager.verify_access_token(token) {
                     if let Ok(user_id) = Uuid::parse_str(&claims.sub) {
-                        if let Ok(Some(user)) = sqlx::query_as!(
-                            User,
-                            "SELECT * FROM users WHERE id = $1",
-                            user_id
+                        if let Ok(Some(user)) = sqlx::query_as::<_, User>(
+                            "SELECT id, email, password_hash, display_name, avatar_url, theme, preferences, created_at, updated_at, last_login_at, reset_token, reset_token_expires FROM users WHERE id = $1"
                         )
+                        .bind(user_id)
                         .fetch_optional(&pool)
                         .await
                         {

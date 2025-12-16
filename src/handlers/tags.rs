@@ -93,7 +93,7 @@ pub async fn get_notes_by_tag(
     Extension(user): Extension<User>,
     Path(tag_id): Path<Uuid>,
     Query(query): Query<TagNotesQuery>,
-) -> Result<Json<TagListResponse>> {
+) -> Result<Json<NoteListResponse>> {
     let page = query.page.unwrap_or(1);
     let limit = query.limit.unwrap_or(20);
 
