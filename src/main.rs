@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let note_service = Arc::new(NoteService::new(pool.clone(), config.clone()));
     let tag_service = Arc::new(TagService::new(pool.clone()));
     let user_service = Arc::new(UserService::new(pool.clone()));
-    let collab_service = Arc::new(CollaborationService::new(pool.clone()));
+    let collab_service = CollaborationService::new(pool.clone());
     tracing::info!("✅ All services initialized");
 
     // Rate limiters
