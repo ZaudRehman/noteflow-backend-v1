@@ -76,7 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let note_service = Arc::new(NoteService::new(pool.clone(), config.clone()));
     let tag_service = Arc::new(TagService::new(pool.clone()));
     let user_service = Arc::new(UserService::new(pool.clone()));
-    let collab_service = CollaborationService::new(pool.clone());
+    let collab_service = Arc::new(CollaborationService::new(pool.clone()));
     tracing::info!("✅ All services initialized");
 
     // Rate limiters
@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/notes/:id", delete(handlers::notes::delete_note))
         .route("/api/v1/notes/:id/favorite", post(handlers::notes::toggle_favorite))
         .route("/api/v1/notes/:id/archive", post(handlers::notes::toggle_archive))
-        .with_state(note_service);
+        .with_state(note_service.clone());
 
     // === TAG ROUTES ===
     let tag_routes = Router::new()
