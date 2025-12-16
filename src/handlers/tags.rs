@@ -11,6 +11,7 @@ use uuid::Uuid;
 use crate::models::{tag::*, user::User};
 use crate::services::TagService;
 use crate::utils::errors::Result;
+use crate::models::note::NoteListResponse;
 
 #[derive(Debug, Deserialize)]
 pub struct TagNotesQuery {
