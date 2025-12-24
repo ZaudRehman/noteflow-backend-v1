@@ -12,6 +12,8 @@ use sqlx::types::ipnetwork::IpNetwork;
 use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
+use crate::config::Config;
+use serde_json::json;
 
 #[derive(Debug, FromRow)]
 struct User {
@@ -300,6 +302,49 @@ impl AuthService {
 
         Ok(())
     }
+    
+    /// Send password reset email via Resend
+    async fn send_reset_email(&self, email: &str, token: &str, config: &Config) -> Result<()> {
+        let reset_url = format!("{}/reset-password?token={}", config.app_url, token);
+        
+        let client = reqwest::Client::new();
+        let payload = json!({
+            "from": config.email_from,
+            "to": [email],
+            "subject": "Reset your NoteFlow password",
+            "html": format!(
+                r#"
+                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #1a1a1f; color: #e1e1e6; border-radius: 12px;">
+                    <h1 style="color: #b8a4d4; font-size: 24px;">NoteFlow</h1>
+                    <p style="font-size: 16px; line-height: 1.5;">You requested to reset your password. Click the button below to set a new one. This link will expire in 1 hour.</p>
+                    <div style="margin: 30px 0;">
+                        <a href="{}" style="background-color: #b8a4d4; color: #1a1a1f; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reset Password</a>
+                    </div>
+                    <p style="font-size: 14px; color: #a1a1aa;">If you didn't request this, you can safely ignore this email.</p>
+                    <hr style="border: 0; border-top: 1px solid #3a3a44; margin: 20px 0;">
+                    <p style="font-size: 12px; color: #71717a;">Sent by NoteFlow - Real-time collaborative notes.</p>
+                </div>
+                "#,
+                reset_url
+            )
+        });
+
+        let response = client
+            .post("https://api.resend.com/emails")
+            .header("Authorization", format!("Bearer {}", config.resend_api_key))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| AppError::InternalError(format!("Failed to send email: {}", e)))?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            tracing::error!("Resend API error: {}", error_text);
+            return Err(AppError::InternalError("Failed to send reset email".into()));
+        }
+
+        Ok(())
+    }
 
     /// Create password reset token
     pub async fn create_password_reset_token(&self, email: &str) -> Result<String> {
@@ -336,10 +381,12 @@ impl AuthService {
         .await?;
 
         tracing::info!("Password reset token created for user {}", user_id);
-
-        // TODO: Send email with token
-        // For now, log it (REMOVE IN PRODUCTION)
-        tracing::warn!("Password reset token (DEV ONLY): {}", token);
+        
+        // Load config for Resend
+        let config = Config::from_env().map_err(|e| AppError::InternalError(format!("Config error: {}", e)))?;
+        
+        // Send actual email via Resend
+        self.send_reset_email(&email, &token, &config).await?;
 
         Ok("If that email exists, a reset link has been sent".into())
     }

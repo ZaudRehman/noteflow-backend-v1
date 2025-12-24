@@ -16,6 +16,9 @@ pub struct Config {
     pub max_notes_per_user: i64,
     pub max_collaborators_per_note: usize,
     pub cors_allowed_origins: Vec<String>,
+    pub resend_api_key: String,
+    pub app_url: String,
+    pub email_from: String,
 }
 
 impl Config {
@@ -70,6 +73,9 @@ impl Config {
                 .parse()
                 .unwrap_or(10),
             cors_allowed_origins: cors_origins,
+            resend_api_key: env::var("RESEND_API_KEY").unwrap_or_default(),
+            app_url: env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),
+            email_from: env::var("EMAIL_FROM").unwrap_or_else(|_| "onboarding@resend.dev".to_string()),
         })
     }
 }
