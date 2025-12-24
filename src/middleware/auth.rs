@@ -50,16 +50,27 @@ pub async fn auth_middleware(
 
     tracing::debug!("Protected route, checking auth: {}", path);
 
-    // Extract token from Authorization header
-    let token = req
+    // Extract token from Authorization header or URL query string (for WebSockets)
+    let token = match req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
-        .ok_or_else(|| {
-            tracing::warn!("Missing or invalid Authorization header for: {}", path);
-            AppError::AuthenticationError("Missing authorization token".to_string())
-        })?;
+    {
+        Some(t) => Some(t.to_string()),
+        None => {
+            // If no header, check query string for "token="
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find(|param| param.starts_with("token="))
+                    .map(|param| param["token=".len()..].to_string())
+            })
+        }
+    }
+    .ok_or_else(|| {
+        tracing::warn!("Missing or invalid Authorization header/param for: {}", path);
+        AppError::AuthenticationError("Missing authorization token".to_string())
+    })?;
 
     // Verify JWT token
     let claims = jwt_manager.verify_access_token(token).map_err(|e| {
