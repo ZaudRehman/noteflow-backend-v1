@@ -1,5 +1,8 @@
 // src/handlers/notes.rs
-use crate::models::note::{ CreateNoteRequest, NoteListResponse, NoteQueryParams, NoteResponse, UpdateNoteRequest, NoteFilterParams, SearchParams, SearchResponse };
+use crate::models::note::{
+    CreateNoteRequest, NoteFilterParams, NoteListResponse, NoteQueryParams, NoteResponse,
+    SearchParams, SearchResponse, UpdateNoteRequest,
+};
 use crate::models::user::User;
 use crate::services::NoteService;
 use crate::utils::errors::Result;

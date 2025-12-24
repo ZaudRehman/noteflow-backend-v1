@@ -1,15 +1,15 @@
+use crate::utils::errors::{AppError, Result};
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use crate::utils::errors::{AppError, Result};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Claims {
-    pub sub: String,  // user_id
+    pub sub: String, // user_id
     pub email: String,
-    pub exp: i64,     // expiration timestamp
-    pub iat: i64,     // issued at timestamp
+    pub exp: i64, // expiration timestamp
+    pub iat: i64, // issued at timestamp
     pub token_type: TokenType,
 }
 

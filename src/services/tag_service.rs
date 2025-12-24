@@ -50,6 +50,28 @@ impl TagService {
         })
     }
 
+    /// Get a single tag by ID
+    pub async fn get(&self, tag_id: Uuid, user_id: Uuid) -> Result<TagResponse> {
+        let tag = sqlx::query_as!(
+            Tag,
+            "SELECT id, user_id, name, created_at FROM tags WHERE id = $1 AND user_id = $2",
+            tag_id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Tag not found or access denied".into()))?;
+
+        let count = self.get_note_count(tag.id).await?;
+
+        Ok(TagResponse {
+            id: tag.id,
+            name: tag.name,
+            note_count: count,
+            created_at: tag.created_at,
+        })
+    }
+
     /// Create a new tag
     pub async fn create(&self, user_id: Uuid, req: CreateTagRequest) -> Result<TagResponse> {
         let name = validation::sanitize_string(&req.name).trim().to_lowercase();

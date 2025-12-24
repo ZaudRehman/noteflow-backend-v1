@@ -8,10 +8,10 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::models::note::NoteListResponse;
 use crate::models::{tag::*, user::User};
 use crate::services::TagService;
 use crate::utils::errors::Result;
-use crate::models::note::NoteListResponse;
 
 #[derive(Debug, Deserialize)]
 pub struct TagNotesQuery {
@@ -37,6 +37,16 @@ pub async fn create_tag(
     let tag = tag_service.create(user.id, req).await?;
     tracing::info!("Tag created: {} by user {}", tag.name, user.id);
     Ok((StatusCode::CREATED, Json(tag)))
+}
+
+/// GET /api/v1/tags/:id
+pub async fn get_tag(
+    State(tag_service): State<Arc<TagService>>,
+    Extension(user): Extension<User>,
+    Path(tag_id): Path<Uuid>,
+) -> Result<Json<TagResponse>> {
+    let tag = tag_service.get(tag_id, user.id).await?;
+    Ok(Json(tag))
 }
 
 /// PUT /api/v1/tags/:id

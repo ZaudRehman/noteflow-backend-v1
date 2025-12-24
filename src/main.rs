@@ -131,6 +131,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let tag_routes = Router::new()
         .route("/api/v1/tags", get(handlers::tags::list_tags))
         .route("/api/v1/tags", post(handlers::tags::create_tag))
+        .route("/api/v1/tags/:id", get(handlers::tags::get_tag))
         .route("/api/v1/tags/:id", put(handlers::tags::update_tag))
         .route("/api/v1/tags/:id", delete(handlers::tags::delete_tag))
         .route("/api/v1/tags/:id/notes", get(handlers::tags::get_notes_by_tag))

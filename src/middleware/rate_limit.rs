@@ -67,7 +67,10 @@ impl RateLimiter {
 
         let requests = self.requests.read().await;
         if let Some(timestamps) = requests.get(key) {
-            let valid_count = timestamps.iter().filter(|&&t| now - t < self.window_secs).count();
+            let valid_count = timestamps
+                .iter()
+                .filter(|&&t| now - t < self.window_secs)
+                .count();
             self.limit.saturating_sub(valid_count as u32)
         } else {
             self.limit
@@ -87,7 +90,10 @@ impl RateLimiter {
             !timestamps.is_empty()
         });
 
-        tracing::debug!("Rate limiter cleanup completed. Active keys: {}", requests.len());
+        tracing::debug!(
+            "Rate limiter cleanup completed. Active keys: {}",
+            requests.len()
+        );
     }
 }
 
