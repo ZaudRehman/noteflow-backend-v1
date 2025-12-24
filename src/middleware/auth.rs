@@ -73,7 +73,7 @@ pub async fn auth_middleware(
     })?;
 
     // Verify JWT token
-    let claims = jwt_manager.verify_access_token(token).map_err(|e| {
+    let claims = jwt_manager.verify_access_token(&token).map_err(|e| {
         tracing::warn!("Token verification failed: {}", e);
         e
     })?;
