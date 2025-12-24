@@ -6,7 +6,7 @@
 
 ![Rust](https://img.shields.io/badge/Rust-1.75+-000000?style=for-the-badge&logo=rust&logoColor=white) ![Axum](https://img.shields.io/badge/Axum-0.7-EC5800?style=for-the-badge&logo=rust&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7+-DC382D?style=for-the-badge&logo=redis&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white) ![Upstash](https://img.shields.io/badge/Upstash-00E9A3?style=for-the-badge&logo=upstash&logoColor=white)
 
-[Live Demo](#) · [API Docs](#api-documentation) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend) · [Report Bug](https://github.com/ZaudRehman/noteflow-backend-v1/issues) · [Request Feature](https://github.com/ZaudRehman/noteflow-backend-v1/issues)
+[Live Demo](https://noteflow-frontend-phi.vercel.app/) · [API Docs](#api-documentation) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend) · [Report Bug](https://github.com/ZaudRehman/noteflow-backend-v1/issues) · [Request Feature](https://github.com/ZaudRehman/noteflow-backend-v1/issues)
 
 </div>
 
