@@ -144,7 +144,4 @@ pub struct SessionListResponse {
     pub total: i64,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct AvatarUploadRequest {
-    pub image: String,
-}
+
