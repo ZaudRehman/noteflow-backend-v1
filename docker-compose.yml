@@ -33,11 +33,21 @@ services:
     build: .
     ports:
       - "8080:8080"
+    env_file:
+      - .env
     environment:
       DATABASE_URL: postgresql://noteflow:noteflow_password@postgres:5432/noteflow
       REDIS_URL: redis://redis:6379
       JWT_SECRET: development-secret-change-in-production
+      JWT_ACCESS_EXPIRATION: "3600"
+      JWT_REFRESH_EXPIRATION: "2592000"
       RUST_LOG: info,noteflow_backend=debug
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+      DATABASE_MAX_CONNECTIONS: "20"
+      MAX_NOTE_SIZE: "102400"
+      MAX_NOTES_PER_USER: "50"
+      RATE_LIMIT_ANONYMOUS: "20"
+      RATE_LIMIT_AUTHENTICATED: "100"
     depends_on:
       postgres:
         condition: service_healthy

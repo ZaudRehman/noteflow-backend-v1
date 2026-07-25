@@ -6,3 +6,4 @@
 .idea
 .vscode
 Cargo.lock
+API_REFERENCE.md
