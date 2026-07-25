@@ -43,7 +43,8 @@ services:
       JWT_REFRESH_EXPIRATION: "2592000"
       RUST_LOG: info,noteflow_backend=debug
       CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
-      DATABASE_MAX_CONNECTIONS: "20"
+      DATABASE_MAX_CONNECTIONS: "50"
+      MAX_WS_CONNECTIONS: "2000"
       MAX_NOTE_SIZE: "102400"
       MAX_NOTES_PER_USER: "50"
       RATE_LIMIT_ANONYMOUS: "20"

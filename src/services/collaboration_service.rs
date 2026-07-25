@@ -4,6 +4,7 @@ use chrono::Utc;
 use futures::{sink::SinkExt, stream::StreamExt};
 use sqlx::PgPool;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
@@ -17,6 +18,8 @@ pub struct CollaborationService {
     tx: broadcast::Sender<WsMessage>,
     redis: Option<Arc<RedisManager>>,
     redis_url: String,
+    pub active_connections: AtomicUsize,
+    pub max_connections: usize,
     /// Track which notes have active Redis subscribers to avoid duplicates
     note_subscribers: Arc<RwLock<HashMap<Uuid, ()>>>,
 }
@@ -26,13 +29,16 @@ impl CollaborationService {
         pool: PgPool,
         redis: Option<Arc<RedisManager>>,
         redis_url: &str,
+        max_connections: usize,
     ) -> Arc<Self> {
-        let (tx, _) = broadcast::channel(1000);
+        let (tx, _) = broadcast::channel(100_000);
         Arc::new(Self {
             pool,
             tx,
             redis,
             redis_url: redis_url.to_string(),
+            active_connections: AtomicUsize::new(0),
+            max_connections,
             note_subscribers: Arc::new(RwLock::new(HashMap::new())),
         })
     }
@@ -111,8 +117,21 @@ impl CollaborationService {
     }
 
     pub async fn handle_connection(self: Arc<Self>, ws: WebSocket, user: User, note_id: Uuid) {
+        // Enforce connection limit
+        let prev = self.active_connections.fetch_add(1, Ordering::SeqCst);
+        if prev >= self.max_connections {
+            self.active_connections.fetch_sub(1, Ordering::SeqCst);
+            tracing::warn!(
+                "Connection rejected: {} active connections exceeds limit of {}",
+                prev,
+                self.max_connections
+            );
+            return;
+        }
+
         // Verify user has access to note
         if let Err(e) = self.verify_note_access(note_id, user.id).await {
+            self.active_connections.fetch_sub(1, Ordering::SeqCst);
             tracing::warn!(
                 "Access denied for user {} to note {}: {}",
                 user.id,
@@ -122,7 +141,12 @@ impl CollaborationService {
             return;
         }
 
-        tracing::info!("User {} joined note {} collaboration", user.id, note_id);
+        tracing::info!(
+            "User {} joined note {} collaboration ({} active connections)",
+            user.id,
+            note_id,
+            prev + 1
+        );
 
         // Ensure Redis subscriber exists for this note
         self.ensure_redis_subscriber(note_id).await;
@@ -269,6 +293,7 @@ impl CollaborationService {
         broadcast_task.abort();
 
         let _ = self.delete_session(note_id, user_id).await;
+        let active = self.active_connections.fetch_sub(1, Ordering::SeqCst) - 1;
 
         let leave_msg = WsMessage::UserLeft {
             note_id,
@@ -277,7 +302,12 @@ impl CollaborationService {
         };
         self.publish(&leave_msg);
 
-        tracing::info!("User {} left note {} collaboration", user_id, note_id);
+        tracing::info!(
+            "User {} left note {} collaboration ({} active connections)",
+            user_id,
+            note_id,
+            active
+        );
     }
 
     async fn verify_note_access(&self, note_id: Uuid, user_id: Uuid) -> Result<()> {

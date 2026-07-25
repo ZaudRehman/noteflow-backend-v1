@@ -15,6 +15,7 @@ pub struct Config {
     pub max_note_size: usize,
     pub max_notes_per_user: i64,
     pub max_collaborators_per_note: usize,
+    pub max_ws_connections: usize,
     pub cors_allowed_origins: Vec<String>,
     pub brevo_api_key: String,
     pub app_url: String,
@@ -76,6 +77,10 @@ impl Config {
                 .unwrap_or_else(|_| "10".to_string())
                 .parse()
                 .unwrap_or(10),
+            max_ws_connections: env::var("MAX_WS_CONNECTIONS")
+                .unwrap_or_else(|_| "2000".to_string())
+                .parse()
+                .unwrap_or(2000),
             cors_allowed_origins: cors_origins,
             brevo_api_key: env::var("BREVO_API_KEY").unwrap_or_default(),
             app_url: env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),

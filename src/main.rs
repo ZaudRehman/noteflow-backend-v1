@@ -88,6 +88,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         pool.clone(),
         Some(redis_manager.clone()),
         &config.redis_url,
+        config.max_ws_connections,
     );
     tracing::info!("✅ All services initialized");
 
