@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO note_tags (note_id, tag_id) \n            VALUES ($1, $2) \n            ON CONFLICT (note_id, tag_id) DO NOTHING\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48973ef10782603297310cc8ef480b0c0e614e1a8bea69f057bd9edf07914d1e"
+}

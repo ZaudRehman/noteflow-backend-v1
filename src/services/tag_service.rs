@@ -316,7 +316,7 @@ impl TagService {
             });
         }
 
-        let total_pages = (total as f64 / limit as f64).ceil() as i64;
+        let _total_pages = (total as f64 / limit as f64).ceil() as i64;
 
         Ok(NoteListResponse {
             notes: responses,

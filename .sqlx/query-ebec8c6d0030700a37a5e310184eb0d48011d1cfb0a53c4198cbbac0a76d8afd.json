@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO active_sessions (note_id, user_id, cursor_line, cursor_column, last_seen_at)\n            VALUES ($1, $2, $3, $4, NOW())\n            ON CONFLICT (note_id, user_id) \n            DO UPDATE SET \n                cursor_line = $3,\n                cursor_column = $4,\n                last_seen_at = NOW()\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ebec8c6d0030700a37a5e310184eb0d48011d1cfb0a53c4198cbbac0a76d8afd"
+}

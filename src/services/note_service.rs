@@ -287,6 +287,12 @@ impl NoteService {
             _ => ("AND n.is_archived = false", false), // "all" or no filter
         };
 
+        let (tag_join, tag_filter) = if params.tag_id.is_some() {
+            ("INNER JOIN note_tags nt ON n.id = nt.note_id", " AND nt.tag_id = $4")
+        } else {
+            ("", "")
+        };
+
         let query_str = format!(
             r#"
             SELECT
@@ -294,29 +300,38 @@ impl NoteService {
                 n.is_favorited, n.is_archived,
                 n.created_at, n.updated_at
             FROM notes n
-            WHERE n.user_id = $1 AND n.is_deleted = false {}
+            {}
+            WHERE n.user_id = $1 AND n.is_deleted = false {} {}
             ORDER BY n.{} {}
             LIMIT $2 OFFSET $3
             "#,
-            filter_clause, sort_by, sort_order
+            tag_join, filter_clause, tag_filter, sort_by, sort_order
         );
 
-        let notes = sqlx::query(&query_str)
+        let mut query = sqlx::query(&query_str)
             .bind(user_id)
             .bind(limit as i64)
-            .bind(offset as i64)
-            .fetch_all(&self.pool)
-            .await?;
+            .bind(offset as i64);
+
+        if let Some(tag_id) = params.tag_id {
+            query = query.bind(tag_id);
+        }
+
+        let notes = query.fetch_all(&self.pool).await?;
 
         let count_query = format!(
-            "SELECT COUNT(*) as count FROM notes n WHERE n.user_id = $1 AND n.is_deleted = false {}",
-            filter_clause
+            "SELECT COUNT(*) as count FROM notes n {} WHERE n.user_id = $1 AND n.is_deleted = false {} {}",
+            tag_join, filter_clause, tag_filter
         );
 
-        let total: i64 = sqlx::query_scalar(&count_query)
-            .bind(user_id)
-            .fetch_one(&self.pool)
-            .await?;
+        let mut count_bind = sqlx::query_scalar(&count_query)
+            .bind(user_id);
+
+        if let Some(tag_id) = params.tag_id {
+            count_bind = count_bind.bind(tag_id);
+        }
+
+        let total: i64 = count_bind.fetch_one(&self.pool).await?;
 
         let mut responses = Vec::new();
         for row in notes {

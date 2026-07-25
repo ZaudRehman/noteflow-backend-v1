@@ -31,10 +31,29 @@ pub async fn update_preferences(
     State(user_service): State<Arc<UserService>>,
     Extension(user): Extension<User>,
     Json(req): Json<UpdatePreferencesRequest>,
-) -> Result<(StatusCode, Json<serde_json::Value>)> {
-    user_service.update_preferences(user.id, req).await?;
-    Ok((
-        StatusCode::OK,
-        Json(serde_json::json!({ "message": "Preferences updated" })),
-    ))
+) -> Result<Json<UserProfile>> {
+    let profile = user_service.update_preferences(user.id, req).await?;
+    Ok(Json(profile))
+}
+
+/// POST /api/v1/users/avatar - Upload avatar image
+pub async fn upload_avatar(
+    State(user_service): State<Arc<UserService>>,
+    Extension(user): Extension<User>,
+    Json(req): Json<AvatarUploadRequest>,
+) -> Result<(StatusCode, Json<UserProfile>)> {
+    let avatar_url = user_service.upload_avatar(&req.image, &user.id).await?;
+
+    let profile = user_service
+        .update_profile(
+            user.id,
+            UpdateProfileRequest {
+                display_name: None,
+                avatar_url: Some(avatar_url),
+            },
+        )
+        .await?;
+
+    tracing::info!("Avatar updated for user {}", user.id);
+    Ok((StatusCode::OK, Json(profile)))
 }

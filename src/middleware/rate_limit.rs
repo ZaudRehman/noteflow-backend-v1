@@ -1,9 +1,7 @@
 use axum::{
-    body::Body,
     extract::{ConnectInfo, Request, State},
-    http::StatusCode,
     middleware::Next,
-    response::{IntoResponse, Response},
+    response::Response,
 };
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -11,31 +9,50 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::RwLock;
 
+use crate::db::RedisManager;
 use crate::utils::errors::AppError;
 
-/// Rate limiter implementation using a sliding window algorithm
+/// Dual-mode rate limiter: tries Redis first, falls back to in-memory.
+/// Redis persistence survives restarts; in-memory is always available.
 #[derive(Clone)]
 pub struct RateLimiter {
-    /// Stores request timestamps for each IP/key
     requests: Arc<RwLock<HashMap<String, Vec<u64>>>>,
-    /// Maximum number of requests allowed
     limit: u32,
-    /// Time window in seconds
     window_secs: u64,
+    redis: Option<Arc<RedisManager>>,
 }
 
 impl RateLimiter {
-    /// Create a new rate limiter
-    pub fn new(limit: u32, window_secs: u64) -> Self {
+    pub fn new(limit: u32, window_secs: u64, redis: Option<Arc<RedisManager>>) -> Self {
         Self {
             requests: Arc::new(RwLock::new(HashMap::new())),
             limit,
             window_secs,
+            redis,
         }
     }
 
-    /// Check if a request should be rate limited
     pub async fn check_rate_limit(&self, key: &str) -> bool {
+        if let Some(ref redis) = self.redis {
+            match redis
+                .check_rate_limit(key, self.limit, self.window_secs)
+                .await
+            {
+                Ok((allowed, _)) => {
+                    if !allowed {
+                        tracing::warn!("Rate limit exceeded (redis) for key: {}", key);
+                    }
+                    return allowed;
+                }
+                Err(e) => {
+                    tracing::warn!("Redis rate limit failed, falling back to in-memory: {}", e);
+                }
+            }
+        }
+        self.check_rate_limit_in_memory(key).await
+    }
+
+    async fn check_rate_limit_in_memory(&self, key: &str) -> bool {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -43,23 +60,30 @@ impl RateLimiter {
 
         let mut requests = self.requests.write().await;
         let timestamps = requests.entry(key.to_string()).or_insert_with(Vec::new);
-
-        // Remove timestamps outside the current window
         timestamps.retain(|&t| now - t < self.window_secs);
 
-        // Check if limit exceeded
         if timestamps.len() >= self.limit as usize {
-            tracing::warn!("Rate limit exceeded for key: {}", key);
+            tracing::warn!("Rate limit exceeded (memory) for key: {}", key);
             return false;
         }
 
-        // Add current timestamp
         timestamps.push(now);
         true
     }
 
-    /// Get remaining requests for a key
     pub async fn get_remaining(&self, key: &str) -> u32 {
+        if let Some(ref redis) = self.redis {
+            if let Ok((_, remaining)) = redis
+                .check_rate_limit(key, self.limit, self.window_secs)
+                .await
+            {
+                return remaining;
+            }
+        }
+        self.get_remaining_in_memory(key).await
+    }
+
+    async fn get_remaining_in_memory(&self, key: &str) -> u32 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -77,7 +101,7 @@ impl RateLimiter {
         }
     }
 
-    /// Clean up old entries to prevent memory leaks
+    /// Only needed for in-memory entries; Redis handles its own expiry
     pub async fn cleanup(&self) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -91,13 +115,12 @@ impl RateLimiter {
         });
 
         tracing::debug!(
-            "Rate limiter cleanup completed. Active keys: {}",
+            "Rate limiter in-memory cleanup done. Active keys: {}",
             requests.len()
         );
     }
 }
 
-/// Limits requests per IP address using a sliding window algorithm
 pub async fn rate_limit_middleware(
     State(rate_limiter): State<Arc<RateLimiter>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -107,7 +130,6 @@ pub async fn rate_limit_middleware(
     let ip = addr.ip().to_string();
 
     if !rate_limiter.check_rate_limit(&ip).await {
-        tracing::warn!("Rate limit exceeded for IP: {}", ip);
         return Err(AppError::RateLimitExceeded);
     }
 
@@ -117,10 +139,13 @@ pub async fn rate_limit_middleware(
     Ok(next.run(req).await)
 }
 
-/// Start background task to periodically clean up rate limiter storage
-pub fn start_cleanup_task(rate_limiter: Arc<RateLimiter>) {
+pub fn start_rate_limit_cleanup(rate_limiter: Arc<RateLimiter>) {
+    // Only spawn cleanup if Redis is not configured (in-memory needs periodic cleanup)
+    if rate_limiter.redis.is_some() {
+        return;
+    }
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300)); // 5 minutes
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(300));
         loop {
             interval.tick().await;
             rate_limiter.cleanup().await;

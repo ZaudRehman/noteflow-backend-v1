@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                n.id, \n                n.title, \n                n.content, \n                n.last_edited_by,\n                n.is_favorited,\n                n.is_archived,\n                n.created_at, \n                n.updated_at\n            FROM notes n\n            INNER JOIN note_tags nt ON n.id = nt.note_id\n            WHERE nt.tag_id = $1 \n                AND n.user_id = $2 \n                AND n.is_deleted = false\n            ORDER BY n.updated_at DESC\n            LIMIT $3 OFFSET $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_edited_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_favorited",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3e95cb9af273ad8e46fd4ece9add1d2f20c4b9e0d65f02d0fae114990ee75917"
+}

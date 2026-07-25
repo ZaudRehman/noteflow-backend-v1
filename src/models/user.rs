@@ -127,3 +127,24 @@ pub struct LogoutRequest {
 pub struct LogoutResponse {
     pub message: String,
 }
+
+#[derive(Debug, Serialize)]
+pub struct SessionInfo {
+    pub id: Uuid,
+    pub user_agent: Option<String>,
+    pub ip_address: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+    pub is_current: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SessionListResponse {
+    pub sessions: Vec<SessionInfo>,
+    pub total: i64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AvatarUploadRequest {
+    pub image: String,
+}

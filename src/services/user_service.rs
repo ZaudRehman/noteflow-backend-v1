@@ -4,16 +4,18 @@ use crate::utils::{
     errors::{AppError, Result},
     validation,
 };
+use crate::Config;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 pub struct UserService {
     pool: PgPool,
+    config: Config,
 }
 
 impl UserService {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(pool: PgPool, config: Config) -> Self {
+        Self { pool, config }
     }
 
     /// Get user profile with all details
@@ -105,10 +107,18 @@ impl UserService {
         &self,
         user_id: Uuid,
         req: UpdatePreferencesRequest,
-    ) -> Result<()> {
+    ) -> Result<UserProfile> {
+        let theme = req.theme.map(|t| {
+            if t == "system" {
+                "auto".to_string()
+            } else {
+                t
+            }
+        });
+
         // Validate theme if provided
-        if let Some(ref theme) = req.theme {
-            if !["light", "dark", "auto"].contains(&theme.as_str()) {
+        if let Some(ref t) = theme {
+            if !["light", "dark", "auto"].contains(&t.as_str()) {
                 return Err(AppError::ValidationError(
                     "Theme must be 'light', 'dark', or 'auto'".into(),
                 ));
@@ -127,7 +137,7 @@ impl UserService {
         let mut query = String::from("UPDATE users SET updated_at = NOW()");
         let mut param_count = 1;
 
-        if req.theme.is_some() {
+        if theme.is_some() {
             param_count += 1;
             query.push_str(&format!(", theme = ${}", param_count));
         }
@@ -141,8 +151,8 @@ impl UserService {
 
         let mut sql_query = sqlx::query(&query).bind(user_id);
 
-        if let Some(theme) = req.theme {
-            sql_query = sql_query.bind(theme);
+        if let Some(t) = theme {
+            sql_query = sql_query.bind(t);
         }
 
         if let Some(prefs) = req.preferences {
@@ -152,7 +162,60 @@ impl UserService {
         sql_query.execute(&self.pool).await?;
 
         tracing::info!("User {} updated preferences", user_id);
-        Ok(())
+        self.get_profile(user_id).await
+    }
+
+    /// Upload avatar image to ImgBB and return the public URL
+    pub async fn upload_avatar(&self, image_data: &str, user_id: &Uuid) -> Result<String> {
+        if self.config.imgbb_api_key.is_empty() {
+            return Err(AppError::InternalError(
+                "Avatar upload not configured (IMGBB_API_KEY missing)".into(),
+            ));
+        }
+
+        // Extract base64 data (strip data:image/...;base64, prefix if present)
+        let base64 = if let Some(comma_pos) = image_data.find(',') {
+            &image_data[comma_pos + 1..]
+        } else {
+            image_data
+        };
+
+        // Validate base64
+        if base64.len() > 5_000_000 {
+            return Err(AppError::ValidationError(
+                "Image too large (max 5MB)".into(),
+            ));
+        }
+
+        let client = reqwest::Client::new();
+        let params = [("key", self.config.imgbb_api_key.as_str()), ("image", base64)];
+
+        let response = client
+            .post("https://api.imgbb.com/1/upload")
+            .form(&params)
+            .send()
+            .await
+            .map_err(|e| {
+                AppError::InternalError(format!("Failed to upload avatar: {}", e))
+            })?;
+
+        if !response.status().is_success() {
+            let text = response.text().await.unwrap_or_default();
+            tracing::error!("ImgBB upload failed: {}", text);
+            return Err(AppError::InternalError("Avatar upload failed".into()));
+        }
+
+        let json: serde_json::Value = response.json().await.map_err(|e| {
+            AppError::InternalError(format!("Failed to parse ImgBB response: {}", e))
+        })?;
+
+        let url = json["data"]["url"]
+            .as_str()
+            .ok_or_else(|| AppError::InternalError("Failed to get image URL from ImgBB".into()))?
+            .to_string();
+
+        tracing::info!("Avatar uploaded to ImgBB for user {}: {}", user_id, url);
+        Ok(url)
     }
 
     /// Update last login timestamp

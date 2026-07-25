@@ -1,0 +1,67 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, title, content, last_edited_by,\n                is_favorited, is_archived, created_at, updated_at\n            FROM notes\n            WHERE user_id = $1\n                AND is_deleted = false\n                AND (\n                    to_tsvector('english', title || ' ' || content) @@ plainto_tsquery('english', $2)\n                    OR title ILIKE $3\n                    OR content ILIKE $3\n                )\n            ORDER BY\n                CASE\n                    WHEN title ILIKE $3 THEN 1\n                    WHEN content ILIKE $3 THEN 2\n                    ELSE 3\n                END,\n                ts_rank(to_tsvector('english', title || ' ' || content), plainto_tsquery('english', $2)) DESC,\n                updated_at DESC\n            LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_edited_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_favorited",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "643840e71f70ee98a24874d1a21a57da0a6c81e9e8f30776a94b9f61e54567fe"
+}

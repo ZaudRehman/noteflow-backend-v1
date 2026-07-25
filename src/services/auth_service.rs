@@ -1,5 +1,8 @@
 // src/services/auth_service.rs
-use crate::models::user::{AuthResponse, LoginRequest, RegisterRequest, UserProfile, UserResponse};
+use crate::models::user::{
+    AuthResponse, LoginRequest, RegisterRequest, SessionInfo, SessionListResponse, UserProfile,
+    UserResponse,
+};
 use crate::utils::{
     errors::{AppError, Result},
     jwt::JwtManager,
@@ -169,6 +172,19 @@ impl AuthService {
         let user_id = Uuid::parse_str(&claims.sub)
             .map_err(|_| AppError::AuthenticationError("Invalid user ID".to_string()))?;
 
+        // Revoke the old refresh token (rotation — prevents replay attacks)
+        let token_hash = self.hash_token(refresh_token);
+        sqlx::query!(
+            r#"
+            UPDATE refresh_tokens
+            SET revoked = true, revoked_at = NOW()
+            WHERE token_hash = $1 AND NOT revoked
+            "#,
+            token_hash
+        )
+        .execute(&self.pool)
+        .await?;
+
         // Fetch user
         let user = sqlx::query!("SELECT email FROM users WHERE id = $1", user_id)
             .fetch_optional(&self.pool)
@@ -182,6 +198,8 @@ impl AuthService {
         let new_refresh = self
             .jwt_manager
             .generate_refresh_token(user_id, user.email)?;
+
+        tracing::info!("Refresh token rotated for user {}", user_id);
 
         Ok((new_access, new_refresh))
     }
@@ -303,35 +321,38 @@ impl AuthService {
         Ok(())
     }
     
-    /// Send password reset email via Resend
+    /// Send password reset email via Brevo
     async fn send_reset_email(&self, email: &str, token: &str, config: &Config) -> Result<()> {
+        if config.brevo_api_key.is_empty() {
+            tracing::warn!("BREVO_API_KEY not set, skipping password reset email to {}", email);
+            return Ok(());
+        }
+
         let reset_url = format!("{}/reset-password?token={}", config.app_url, token);
-        
+
         let client = reqwest::Client::new();
         let payload = json!({
-            "from": config.email_from,
-            "to": [email],
+            "sender": { "email": config.email_from, "name": "NoteFlow" },
+            "to": [{ "email": email }],
             "subject": "Reset your NoteFlow password",
-            "html": format!(
-                r#"
-                <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; background-color: #1a1a1f; color: #e1e1e6; border-radius: 12px;">
-                    <h1 style="color: #b8a4d4; font-size: 24px;">NoteFlow</h1>
-                    <p style="font-size: 16px; line-height: 1.5;">You requested to reset your password. Click the button below to set a new one. This link will expire in 1 hour.</p>
-                    <div style="margin: 30px 0;">
-                        <a href="{}" style="background-color: #b8a4d4; color: #1a1a1f; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reset Password</a>
+            "htmlContent": format!(
+                r#"<div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:20px;background-color:#1a1a1f;color:#e1e1e6;border-radius:12px;">
+                    <h1 style="color:#b8a4d4;font-size:24px;">NoteFlow</h1>
+                    <p style="font-size:16px;line-height:1.5;">You requested to reset your password. Click the button below to set a new one. This link will expire in 1 hour.</p>
+                    <div style="margin:30px 0;">
+                        <a href="{}" style="background-color:#b8a4d4;color:#1a1a1f;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;">Reset Password</a>
                     </div>
-                    <p style="font-size: 14px; color: #a1a1aa;">If you didn't request this, you can safely ignore this email.</p>
-                    <hr style="border: 0; border-top: 1px solid #3a3a44; margin: 20px 0;">
-                    <p style="font-size: 12px; color: #71717a;">Sent by NoteFlow - Real-time collaborative notes.</p>
-                </div>
-                "#,
+                    <p style="font-size:14px;color:#a1a1aa;">If you didn't request this, you can safely ignore this email.</p>
+                    <hr style="border:0;border-top:1px solid #3a3a44;margin:20px 0;">
+                    <p style="font-size:12px;color:#71717a;">Sent by NoteFlow</p>
+                </div>"#,
                 reset_url
             )
         });
 
         let response = client
-            .post("https://api.resend.com/emails")
-            .header("Authorization", format!("Bearer {}", config.resend_api_key))
+            .post("https://api.brevo.com/v3/smtp/email")
+            .header("api-key", &config.brevo_api_key)
             .json(&payload)
             .send()
             .await
@@ -339,10 +360,66 @@ impl AuthService {
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            tracing::error!("Resend API error: {}", error_text);
+            tracing::error!("Brevo API error: {}", error_text);
             return Err(AppError::InternalError("Failed to send reset email".into()));
         }
 
+        Ok(())
+    }
+
+    /// List active sessions for a user
+    pub async fn list_sessions(&self, user_id: Uuid, current_token_hash: &str) -> Result<SessionListResponse> {
+        let sessions = sqlx::query!(
+            r#"
+            SELECT id, user_agent, ip_address, created_at, expires_at, token_hash
+            FROM refresh_tokens
+            WHERE user_id = $1 AND NOT revoked AND expires_at > NOW()
+            ORDER BY created_at DESC
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let total = sessions.len() as i64;
+
+        let session_list: Vec<SessionInfo> = sessions
+            .into_iter()
+            .map(|s| SessionInfo {
+                id: s.id,
+                user_agent: s.user_agent,
+                ip_address: s.ip_address.map(|ip| ip.to_string()),
+                created_at: s.created_at,
+                expires_at: s.expires_at,
+                is_current: s.token_hash == current_token_hash,
+            })
+            .collect();
+
+        Ok(SessionListResponse {
+            sessions: session_list,
+            total,
+        })
+    }
+
+    /// Revoke a specific session by ID
+    pub async fn revoke_session(&self, session_id: Uuid, user_id: Uuid) -> Result<()> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE refresh_tokens
+            SET revoked = true, revoked_at = NOW()
+            WHERE id = $1 AND user_id = $2 AND NOT revoked
+            "#,
+            session_id,
+            user_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::NotFound("Session not found or already revoked".into()));
+        }
+
+        tracing::info!("Session {} revoked for user {}", session_id, user_id);
         Ok(())
     }
 

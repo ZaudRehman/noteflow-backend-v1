@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) FROM notes n INNER JOIN note_tags nt ON n.id = nt.note_id WHERE nt.tag_id = $1 AND n.user_id = $2 AND n.is_deleted = false",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "da010da5c28875e095de31c0edbd7f390abab990ee200d7850bebebdfece5370"
+}

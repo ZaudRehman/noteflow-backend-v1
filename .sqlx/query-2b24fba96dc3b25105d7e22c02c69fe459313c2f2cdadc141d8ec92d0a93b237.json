@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE notes \n               SET title = $1, content = $2, last_edited_by = $3, updated_at = NOW()\n               WHERE id = $4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b24fba96dc3b25105d7e22c02c69fe459313c2f2cdadc141d8ec92d0a93b237"
+}

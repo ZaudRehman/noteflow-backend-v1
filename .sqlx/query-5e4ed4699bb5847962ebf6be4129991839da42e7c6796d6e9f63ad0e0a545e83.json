@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notes (user_id, title, content, last_edited_by)\n               VALUES ($1, $2, $3, $1)\n               RETURNING id, user_id, title, content, last_edited_by, \n                         is_favorited, is_archived, is_deleted, created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_edited_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_favorited",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "is_archived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "is_deleted",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5e4ed4699bb5847962ebf6be4129991839da42e7c6796d6e9f63ad0e0a545e83"
+}

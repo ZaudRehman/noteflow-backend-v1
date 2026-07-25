@@ -1,45 +1,37 @@
-# NoteFlow Backend 🚀
+# NoteFlow Backend
 
-<div align="center">
+A production-grade REST API for real-time collaborative note-taking built with Rust, Axum, PostgreSQL, and Redis.
 
-**A production-grade REST API for real-time collaborative note-taking built with Rust, Axum, PostgreSQL, and Redis**
-
-![Rust](https://img.shields.io/badge/Rust-1.75+-000000?style=for-the-badge&logo=rust&logoColor=white) ![Axum](https://img.shields.io/badge/Axum-0.7-EC5800?style=for-the-badge&logo=rust&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15+-4169E1?style=for-the-badge&logo=postgresql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-7+-DC382D?style=for-the-badge&logo=redis&logoColor=white) ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?style=for-the-badge&logo=supabase&logoColor=white) ![Upstash](https://img.shields.io/badge/Upstash-00E9A3?style=for-the-badge&logo=upstash&logoColor=white)
-
-[Live Demo](https://noteflow-frontend-phi.vercel.app/) · [API Docs](#api-documentation) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend) · [Report Bug](https://github.com/ZaudRehman/noteflow-backend-v1/issues) · [Request Feature](https://github.com/ZaudRehman/noteflow-backend-v1/issues)
-
-</div>
+[Live Demo](https://noteflow-frontend-phi.vercel.app/) · [API Docs](#api-documentation) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend)
 
 ---
 
-## 📖 Table of Contents
+## Table of Contents
 
-- [About](#-about-the-project)
-- [Features](#-key-features)
-- [Tech Stack](#️-tech-stack)
-- [Architecture](#️-architecture)
-- [Getting Started](#-getting-started)
-- [API Documentation](#-api-documentation)
-- [Database Schema](#️-database-schema)
-- [WebSocket Integration](#-websocket-integration)
-- [Deployment](#-deployment)
-- [Project Structure](#-project-structure)
-- [Security](#-security)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Contact](#-contact)
+- [About](#about)
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Architecture](#architecture)
+- [Getting Started](#getting-started)
+- [API Documentation](#api-documentation)
+- [Database Schema](#database-schema)
+- [WebSocket Integration](#websocket-integration)
+- [Deployment](#deployment)
+- [Project Structure](#project-structure)
+- [Security](#security)
+- [Contributing](#contributing)
+- [License](#license)
+- [Contact](#contact)
 
 ---
 
-## 🎯 About The Project
+## About
 
-NoteFlow Backend is a **high-performance REST API** built with Rust that powers a collaborative note-taking application. Designed with production readiness in mind, it demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication and cloud-native deployment.
+NoteFlow Backend is a high-performance REST API built with Rust that powers a collaborative note-taking application. It demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication, and cloud-native deployment.
 
-### Why NoteFlow Backend?
+### Capabilities
 
-This project showcases mastery of critical backend engineering competencies:
-
-- **High Performance** - Built with Rust for blazing-fast response times (<200ms p95)
+- **High Performance** - Built with Rust for sub-200ms p95 response times
 - **Enterprise Security** - JWT authentication, bcrypt hashing, rate limiting
 - **Scalable Architecture** - Async/await patterns, connection pooling, horizontal scaling
 - **Real-Time Sync** - WebSocket support with Redis pub/sub for multi-instance coordination
@@ -48,224 +40,237 @@ This project showcases mastery of critical backend engineering competencies:
 - **Production Ready** - Comprehensive error handling, structured logging, health checks
 - **Cloud Native** - Docker support, Supabase/Upstash integration, multiple deployment options
 
-### What This Demonstrates
-
-- Building production-grade APIs with Rust and Axum framework
-- Implementing JWT-based authentication with refresh tokens
-- Working with PostgreSQL using SQLx with compile-time query verification
-- Redis integration for caching and pub/sub messaging
-- WebSocket real-time communication architecture
-- Database migration management with version control
-- Async/await programming patterns in Rust
-- Cloud service integration (Supabase, Upstash)
-- Docker containerization and orchestration
-- RESTful API design following industry standards
-
 ---
 
-## ✨ Key Features
+## Features
 
 ### Authentication & Authorization
-- **JWT Token System** - Dual token approach with access (1h) and refresh (30d) tokens
-- **Secure Password Storage** - Bcrypt hashing with configurable cost factor
-- **Token Refresh Flow** - Seamless token renewal without re-authentication
-- **User Management** - Registration, login, and session management
+- JWT dual-token system with access (1h) and refresh (30d) tokens
+- Secure password storage with bcrypt hashing
+- Seamless token refresh without re-authentication
+- Session listing and revocation
+- User registration, login, and management
 
 ### Note Management
-- **Full CRUD Operations** - Create, read, update, delete with ownership verification
-- **Favorites & Archive** - Mark important notes and archive old ones
-- **Soft Delete** - 30-day recovery window for deleted notes
-- **Advanced Filtering** - Filter by favorite, archive, tags, search query
-- **Pagination** - Efficient data retrieval with configurable page sizes
-- **Sorting** - Sort by created, updated, or title with ASC/DESC
-- **Content Limits** - Configurable max size (100KB) and notes per user (500)
+- Full CRUD operations with ownership verification
+- Favorites and archive organization
+- Soft delete with 30-day recovery window
+- Advanced filtering by favorite, archive, tags, and search query
+- Paginated retrieval with configurable page sizes
+- Sorting by created, updated, or title with ASC/DESC
+- Configurable content limits (100KB max, 500 notes per user)
 
 ### Tag System
-- **Custom Tags** - User-specific tags with unique names
-- **Many-to-Many Relations** - Multiple tags per note, multiple notes per tag
-- **Tag CRUD** - Create, update, delete tags independently
-- **Tag Statistics** - View note counts per tag
-- **Batch Operations** - Add/remove tags from notes
-- **Tag-Based Filtering** - List all notes with specific tag
+- User-specific tags with unique names
+- Many-to-many relationships between notes and tags
+- Independent tag CRUD operations
+- Note count statistics per tag
+- Batch tag operations on notes
+- Tag-based note filtering
 
 ### Search & Discovery
-- **Full-Text Search** - PostgreSQL GIN indexes for fast content search
-- **Multi-Field Search** - Search across titles and content
-- **Ranking** - Results ranked by relevance (title match > content match)
-- **Fuzzy Matching** - ILIKE queries for partial matches
-- **Real-Time Results** - Sub-second search response times
+- Full-text search via PostgreSQL GIN indexes
+- Multi-field search across titles and content
+- Relevance-ranked results (title match weighted higher)
+- Fuzzy matching via ILIKE queries
+- Sub-second search response times
 
 ### User Management
-- **Profile Customization** - Update display name and avatar
-- **Theme Settings** - Light/dark/auto theme preferences
-- **Custom Preferences** - JSONB field for arbitrary user settings
-- **Last Login Tracking** - Monitor user activity
-- **Account Security** - Password change and reset flows
+- Display name customization
+- Avatar upload via ImgBB CDN (base64 input)
+- Theme preferences (light, dark, system)
+- JSONB custom preferences field
+- Last login activity tracking
+- Password change and reset flows
+- Email notifications via Brevo
 
 ### Version History
-- **Automatic Revisions** - PostgreSQL triggers create snapshots on content changes
-- **Revision Browsing** - List all historical versions with metadata
-- **Point-in-Time Restore** - Revert notes to any previous version
-- **Change Tracking** - Author and timestamp for every revision
+- Automatic revision snapshots via PostgreSQL triggers
+- Revision browsing with metadata
+- Point-in-time restore to any previous version
+- Author and timestamp tracking per revision
+
+### Push Notifications
+- RFC 8291 Web Push protocol with VAPID authentication
+- Pure Rust cryptography (AES-GCM, ECDH, HKDF, no system OpenSSL)
+- Subscription management (subscribe, unsubscribe, list)
+- Automatic cleanup of expired endpoints (410 responses)
+- Transactional email via Brevo (300 emails/day free)
+- Password change alerts
 
 ### Real-Time Collaboration
-- **WebSocket Infrastructure** - Persistent connections for instant updates
-- **Active User Presence** - See who's currently editing a note
-- **Cursor Tracking** - View collaborator cursor positions in real-time
-- **Multi-Instance Sync** - Redis pub/sub broadcasts across servers
-- **Connection Management** - Auto-cleanup of stale sessions
-- **Message Types** - Note updates, cursor moves, user join/leave events
+- Persistent WebSocket connections for instant updates
+- Active user presence tracking
+- Real-time collaborator cursor positions
+- Multi-instance sync via Redis pub/sub
+- Automatic cleanup of stale sessions
+- Message types: note updates, cursor moves, user join/leave
 
 ### Security & Performance
-- **Rate Limiting** - IP-based throttling (20/min anonymous, 100/min authenticated)
-- **Input Validation** - Comprehensive sanitization and format checking
-- **SQL Injection Prevention** - Parameterized queries via SQLx
-- **CORS Configuration** - Customizable cross-origin policies
-- **Connection Pooling** - Optimized database connection management (20 max)
-- **Indexed Queries** - Composite indexes for fast lookups
-- **Compression** - Automatic gzip compression for responses
+- IP-based rate limiting (20/min anonymous, 100/min authenticated)
+- Comprehensive input validation and sanitization
+- SQL injection prevention via parameterized queries
+- Configurable CORS policies
+- Connection pooling (20 max connections)
+- Composite indexes for fast lookups
+- Automatic gzip response compression
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 ### Backend Framework
-- **[Axum](https://github.com/tokio-rs/axum)** 0.7 - Ergonomic and modular web framework
-- **[Tokio](https://tokio.rs/)** - Async runtime with multi-threading
-- **[Tower](https://github.com/tower-rs/tower)** - Middleware and service abstractions
-- **[Tower-HTTP](https://github.com/tower-rs/tower-http)** - CORS, compression, tracing middleware
+- [Axum](https://github.com/tokio-rs/axum) 0.7 - Ergonomic and modular web framework
+- [Tokio](https://tokio.rs/) - Async runtime with multi-threading
+- [Tower](https://github.com/tower-rs/tower) - Middleware and service abstractions
+- [Tower-HTTP](https://github.com/tower-rs/tower-http) - CORS, compression, tracing middleware
 
 ### Database & Caching
-- **[PostgreSQL](https://www.postgresql.org/)** 15+ - Relational database with ACID guarantees
-- **[SQLx](https://github.com/launchbadge/sqlx)** 0.7 - Async SQL toolkit with compile-time verification
-- **[Redis](https://redis.io/)** 7+ - In-memory data store for caching and pub/sub
-- **[Supabase](https://supabase.com/)** - Managed PostgreSQL with connection pooling
-- **[Upstash](https://upstash.com/)** - Serverless Redis with TLS support
+- [PostgreSQL](https://www.postgresql.org/) 15+ - Relational database with ACID guarantees
+- [SQLx](https://github.com/launchbadge/sqlx) 0.7 - Async SQL toolkit with compile-time verification
+- [Redis](https://redis.io/) 7+ - In-memory data store for caching and pub/sub
+- [Supabase](https://supabase.com/) - Managed PostgreSQL with connection pooling
+- [Upstash](https://upstash.com/) - Serverless Redis with TLS support
 
 ### Authentication & Security
-- **[jsonwebtoken](https://github.com/Keats/jsonwebtoken)** - JWT implementation with HS256/RS256
-- **[bcrypt](https://github.com/Keats/rust-bcrypt)** - Password hashing with salt rounds
-- **[uuid](https://github.com/uuid-rs/uuid)** - Universally unique identifiers
-- **[validator](https://github.com/Keats/validator)** - Struct validation with derive macros
-- **[sha2](https://github.com/RustCrypto/hashes)** - Token hashing
-- **[rand](https://github.com/rust-random/rand)** - Secure random generation
+- [jsonwebtoken](https://github.com/Keats/jsonwebtoken) - JWT implementation with HS256/RS256
+- [bcrypt](https://github.com/Keats/rust-bcrypt) - Password hashing with salt rounds
+- [uuid](https://github.com/uuid-rs/uuid) - Universally unique identifiers
+- [validator](https://github.com/Keats/validator) - Struct validation with derive macros
+- [sha2](https://github.com/RustCrypto/hashes) - Token hashing
+- [rand](https://github.com/rust-random/rand) - Secure random generation
+
+### Encryption
+- [aes-gcm](https://github.com/RustCrypto/AEADs) - AES-256-GCM for Web Push payload encryption
+- [p256](https://github.com/RustCrypto/elliptic-curves) - NIST P-256 ECDH + ECDSA for VAPID
+- [hkdf](https://github.com/RustCrypto/KDFs) - HMAC-based key derivation for push salt
 
 ### Serialization & Validation
-- **[Serde](https://serde.rs/)** - Serialization framework for JSON/YAML/TOML
-- **[serde_json](https://github.com/serde-rs/json)** - JSON support for Serde
-- **[chrono](https://github.com/chronotope/chrono)** - Date and time library
+- [Serde](https://serde.rs/) - Serialization framework for JSON
+- [serde_json](https://github.com/serde-rs/json) - JSON support for Serde
+- [base64](https://github.com/marshallpierce/rust-base64) - Base64 encoding/decoding
+- [url](https://github.com/servo/rust-url) - URL parsing and validation
+- [chrono](https://github.com/chronotope/chrono) - Date and time library
+
+### Email & Notifications
+- [Brevo](https://www.brevo.com/) - Transactional email delivery (300 emails/day free)
+- [reqwest](https://github.com/seanmonstar/reqwest) - HTTP client for API integration
 
 ### Configuration & Logging
-- **[dotenvy](https://github.com/allan2/dotenvy)** - Environment variable management
-- **[tracing](https://github.com/tokio-rs/tracing)** - Structured logging and diagnostics
-- **[tracing-subscriber](https://github.com/tokio-rs/tracing)** - Log formatting and filtering
+- [dotenvy](https://github.com/allan2/dotenvy) - Environment variable management
+- [tracing](https://github.com/tokio-rs/tracing) - Structured logging and diagnostics
+- [tracing-subscriber](https://github.com/tokio-rs/tracing) - Log formatting and filtering
 
 ### DevOps & Deployment
-- **[Docker](https://www.docker.com/)** - Containerization with multi-stage builds
-- **[Docker Compose](https://docs.docker.com/compose/)** - Local development orchestration
-- **GitHub Actions** - CI/CD pipeline
+- [Docker](https://www.docker.com/) - Containerization with multi-stage builds
+- [Docker Compose](https://docs.docker.com/compose/) - Local development orchestration
+- GitHub Actions - CI/CD pipeline
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
-NoteFlow Backend follows a **clean layered architecture** inspired by Domain-Driven Design:
+NoteFlow Backend follows a clean layered architecture:
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                       Axum Web Server                       │
-│                    (Tower Middleware Stack)                 │
-├─────────────────────────────────────────────────────────────┤
-│  Middleware Layer                                           │
-│  ├─ CORS                    (Cross-origin resource sharing) │
-│  ├─ Compression             (Gzip compression)              │
-│  ├─ Request Tracing         (Structured logging)            │
-│  ├─ Rate Limiting           (IP-based throttling)           │
-│  └─ Authentication          (JWT verification)              │
-├─────────────────────────────────────────────────────────────┤
-│  Presentation Layer (HTTP Handlers)                         │
-│  ├─ Auth Routes             (register, login, refresh)      │
-│  ├─ Note Routes             (CRUD operations)               │
-│  ├─ Revision Routes         (history, restore)              │
-│  ├─ Tag Routes              (tag management)                │
-│  └─ WebSocket Handler       (real-time messaging)           │
-├─────────────────────────────────────────────────────────────┤
-│  Business Logic Layer (Services)                            │
-│  ├─ AuthService             (authentication & tokens)       │
-│  ├─ NoteService             (note operations)               │
-│  ├─ UserService             (user management)               │
-│  ├─ TagService              (tagging system)                │
-│  └─ CollaborationService        (real-time sync)            │
-├─────────────────────────────────────────────────────────────┤
-│  Data Access Layer                                          │
-│  ├─ SQLx Queries            (parameterized SQL)             │
-│  ├─ Connection Pool         (PostgreSQL sessions)           │
-│  ├─ Redis Manager           (pub/sub, caching)              │
-│  └─ Migration Manager       (schema versioning)             │
-├─────────────────────────────────────────────────────────────┤
-│  Infrastructure                                             │
-│  ├─ PostgreSQL 15+          (primary data store)            │
-│  ├─ Redis 7+                (cache & pub/sub)               │
-│  └─ File System             (static assets)                 │
-└─────────────────────────────────────────────────────────────┘
++---------------------------------------------------------------+
+|                       Axum Web Server                          |
+|                    (Tower Middleware Stack)                    |
++---------------------------------------------------------------+
+|  Middleware Layer                                              |
+|  +-- CORS                    (Cross-origin resource sharing)   |
+|  +-- Compression             (Gzip compression)                |
+|  +-- Request Tracing         (Structured logging)              |
+|  +-- Rate Limiting           (IP-based throttling)             |
+|  +-- Authentication          (JWT verification)                |
++---------------------------------------------------------------+
+|  Presentation Layer (HTTP Handlers)                            |
+|  +-- Auth Routes             (register, login, refresh)        |
+|  +-- Note Routes             (CRUD operations)                 |
+|  +-- Revision Routes         (history, restore)                |
+|  +-- Tag Routes              (tag management)                  |
+|  +-- WebSocket Handler       (real-time messaging)             |
++---------------------------------------------------------------+
+|  Business Logic Layer (Services)                               |
+|  +-- AuthService             (authentication & tokens)         |
+|  +-- NoteService             (note operations)                 |
+|  +-- UserService             (user management)                 |
+|  +-- TagService              (tagging system)                  |
+|  +-- RevisionService         (version history)                 |
+|  +-- NotificationService     (push + email notifications)      |
+|  +-- CollaborationService    (real-time sync)                  |
++---------------------------------------------------------------+
+|  Data Access Layer                                             |
+|  +-- SQLx Queries            (parameterized SQL)               |
+|  +-- Connection Pool         (PostgreSQL sessions)             |
+|  +-- Redis Manager           (pub/sub, caching)                |
+|  +-- Migration Manager       (schema versioning)               |
++---------------------------------------------------------------+
+|  Infrastructure                                                |
+|  +-- PostgreSQL 15+          (primary data store)              |
+|  +-- Redis 7+                (cache & pub/sub)                 |
+|  +-- File System             (static assets)                   |
++---------------------------------------------------------------+
 ```
 
 ### Design Patterns
 
-- **Repository Pattern** - Data access abstraction through services
-- **Dependency Injection** - Axum's State for service sharing
-- **Middleware Pattern** - Request/response transformation pipeline
-- **Factory Pattern** - JWT token generation and validation
-- **Observer Pattern** - Redis pub/sub for real-time events
-- **Strategy Pattern** - Configurable rate limiting and validation
+- Repository Pattern - Data access abstraction through services
+- Dependency Injection - Axum's State for service sharing
+- Middleware Pattern - Request/response transformation pipeline
+- Factory Pattern - JWT token generation and validation
+- Observer Pattern - Redis pub/sub for real-time events
+- Strategy Pattern - Configurable rate limiting and validation
 
 ### Data Flow
 
 ```
-HTTP Request → Middleware → Handler → Service → Database → Response
-                   ↓
+HTTP Request -> Middleware -> Handler -> Service -> Database -> Response
+                    |
               [Rate Limit]
               [Auth Check]
               [Validation]
-                   ↓
-                Response
+                    |
+                 Response
 ```
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
 ### Prerequisites
 
-Ensure you have these installed:
-
-- **Rust 1.75+** - [Install Rust](https://rustup.rs/)
-- **PostgreSQL 15+** - [Download](https://www.postgresql.org/download/) or use [Supabase](https://supabase.com/)
-- **Redis 7+** - [Download](https://redis.io/download) or use [Upstash](https://upstash.com/)
-- **SQLx CLI** - For database migrations
-- **Git** - Version control
+- Rust 1.75+ - [Install Rust](https://rustup.rs/)
+- PostgreSQL 15+ - [Download](https://www.postgresql.org/download/) or use [Supabase](https://supabase.com/)
+- Redis 7+ - [Download](https://redis.io/download) or use [Upstash](https://upstash.com/)
+- SQLx CLI - For database migrations
+- Git - Version control
 
 ### Local Development Setup
 
-#### 1. **Clone the repository**
+#### 1. Clone the repository
+
 ```bash
 git clone https://github.com/ZaudRehman/noteflow-backend-v1.git
 cd noteflow-backend-v1
 ```
 
-#### 2. **Install SQLx CLI**
+#### 2. Install SQLx CLI
+
 ```bash
 cargo install sqlx-cli --features postgres
 ```
 
-#### 3. **Configure environment variables**
+#### 3. Configure environment variables
 
 Create `.env` file:
+
 ```bash
 cp .env.example .env
 ```
 
 Edit `.env` with your credentials:
+
 ```env
 # Server
 HOST=0.0.0.0
@@ -285,6 +290,19 @@ JWT_SECRET=your-super-secret-key-minimum-32-characters
 JWT_ACCESS_EXPIRATION=86400
 JWT_REFRESH_EXPIRATION=604800
 
+# Email (Brevo - 300 emails/day free)
+BREVO_API_KEY=
+EMAIL_FROM=noreply@noteflow.app
+APP_URL=http://localhost:3000
+
+# Avatar Upload (ImgBB - 1000 images, 32MB max)
+IMGBB_API_KEY=
+
+# Web Push VAPID Keys (optional - auto-generated if empty)
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:notifications@noteflow.app
+
 # Limits
 MAX_NOTE_SIZE=102400
 MAX_NOTES_PER_USER=50
@@ -292,7 +310,8 @@ RATE_LIMIT_ANONYMOUS=20
 RATE_LIMIT_AUTHENTICATED=100
 ```
 
-#### 4. **Setup database**
+#### 4. Setup database
+
 ```bash
 # Create database
 sqlx database create
@@ -301,7 +320,8 @@ sqlx database create
 sqlx migrate run
 ```
 
-#### 5. **Build and run**
+#### 5. Build and run
+
 ```bash
 # Development mode (with auto-reload)
 cargo watch -x run
@@ -314,7 +334,8 @@ cargo build --release
 ./target/release/noteflow-backend
 ```
 
-#### 6. **Verify installation**
+#### 6. Verify installation
+
 ```bash
 # Health check
 curl http://localhost:8080/health
@@ -337,9 +358,10 @@ docker-compose down
 
 ---
 
-## 📚 API Documentation
+## API Documentation
 
 ### Base URL
+
 ```
 http://localhost:8080
 ```
@@ -347,6 +369,7 @@ http://localhost:8080
 ### Authentication
 
 All protected endpoints require JWT token in `Authorization` header:
+
 ```
 Authorization: Bearer <access_token>
 ```
@@ -369,6 +392,8 @@ Authorization: Bearer <access_token>
 |--------|----------|-------------|
 | `GET` | `/api/v1/auth/me` | Get current user profile |
 | `POST` | `/api/v1/auth/logout` | Revoke refresh token |
+| `GET` | `/api/v1/auth/sessions` | List active sessions |
+| `DELETE` | `/api/v1/auth/sessions/:session_id` | Revoke specific session |
 
 #### Notes (Protected)
 
@@ -394,13 +419,30 @@ Authorization: Bearer <access_token>
 | `POST` | `/api/v1/notes/:note_id/tags` | Add tag to note |
 | `DELETE` | `/api/v1/notes/:note_id/tags/:tag_id` | Remove tag from note |
 
+#### Version History (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/notes/:note_id/history` | List revisions for a note |
+| `GET` | `/api/v1/notes/:note_id/history/:revision_id` | Get specific revision content |
+| `POST` | `/api/v1/notes/:note_id/history/:revision_id/restore` | Restore note to revision |
+
+#### Push Notifications (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/notifications/push/subscriptions` | List push subscriptions |
+| `POST` | `/api/v1/notifications/push/subscribe` | Subscribe to push notifications |
+| `DELETE` | `/api/v1/notifications/push/subscribe/:id` | Unsubscribe from push notifications |
+
 #### User Profile (Protected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update profile (name, avatar) |
+| `PUT` | `/api/v1/users/profile` | Update profile (name) |
 | `PUT` | `/api/v1/users/preferences` | Update preferences (theme, custom JSON) |
+| `POST` | `/api/v1/users/avatar` | Upload avatar (base64 image, ImgBB CDN) |
 
 #### Search (Protected)
 
@@ -420,7 +462,6 @@ Authorization: Bearer <access_token>
 |--------|----------|-------------|
 | `GET` | `/health` | API health status |
 
-
 ### HTTP Status Codes
 
 | Code | Status | Usage |
@@ -438,71 +479,82 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 🗄️ Database Schema
+## Database Schema
 
 ### Entity Relationship Diagram
 
 ```
-                    ┌──────────────────────────┐
-                    │         users            │
-                    ├──────────────────────────┤
-                    │ id (PK, UUID)            │
-                    │ email (UNIQUE)           │
-                    │ password_hash            │
-                    │ display_name             │
-                    │ avatar_url               │
-                    │ theme                    │
-                    │ preferences (JSONB)      │
-                    │ reset_token              │
-                    │ reset_token_expires      │
-                    │ last_login_at            │
-                    │ created_at               │
-                    │ updated_at               │
-                    └────────┬─────────────────┘
-                             │
-                             │ 1:N 
-              ┌──────────────┼──────────────┬──────────────┐
-              │              │              │              │
-              ▼              ▼              ▼              ▼
-    ┌─────────────────┐ ┌─────────────┐ ┌──────────────┐ ┌──────────────────┐
-    │     notes       │ │    tags     │ │  revisions   │ │ refresh_tokens   │
-    ├─────────────────┤ ├─────────────┤ ├──────────────┤ ├──────────────────┤
-    │ id (PK)         │ │ id (PK)     │ │ id (PK)      │ │ id (PK)          │
-    │ user_id (FK)    │ │ user_id(FK) │ │ note_id (FK) │ │ user_id (FK)     │
-    │ title           │ │ name        │ │ content      │ │ token_hash       │
-    │ content         │ │ created_at  │ │ created_by   │ │ expires_at       │
-    │ is_favorited    │ └──────┬──────┘ │ created_at   │ │ revoked          │
-    │ is_archived     │        │        └──────────────┘ │ revoked_at       │
-    │ is_deleted      │        │                         │ user_agent       │
-    │ last_edited_by  │        │ N:M                     │ ip_address       │
-    │ created_at      │        │                         │ created_at       │
-    │ updated_at      │   ┌────┴─────────┐               └──────────────────┘
-    └────────┬────────┘   │  note_tags   │
-             │            ├──────────────┤
-             │            │ note_id (FK) │
-             │            │ tag_id (FK)  │
-             │            │ created_at   │
-             │            └──────────────┘
-             │ 1:N 
-             │
-             ▼
-    ┌──────────────────┐
-    │ active_sessions  │
-    ├──────────────────┤
-    │ id (PK)          │
-    │ note_id (FK)     │
-    │ user_id (FK)     │
-    │ cursor_line      │
-    │ cursor_column    │
-    │ last_seen_at     │
-    │ created_at       │
-    └──────────────────┘
+                    +----------------------------+
+                    |         users              |
+                    +----------------------------+
+                    | id (PK, UUID)              |
+                    | email (UNIQUE)             |
+                    | password_hash              |
+                    | display_name               |
+                    | avatar_url                 |
+                    | theme                      |
+                    | preferences (JSONB)        |
+                    | reset_token                |
+                    | reset_token_expires        |
+                    | last_login_at              |
+                    | created_at                 |
+                    | updated_at                 |
+                    +----------+-----------------+
+                               |
+                               | 1:N
+              +----------------+----------------+------------------+
+              |                |                |                  |
+              v                v                v                  v
+    +-------------------+ +-------------+ +----------------+ +------------------+
+    |      notes        | |    tags     | |   revisions    | | refresh_tokens   |
+    +-------------------+ +-------------+ +----------------+ +------------------+
+    | id (PK)           | | id (PK)     | | id (PK)        | | id (PK)          |
+    | user_id (FK)      | | user_id(FK) | | note_id (FK)   | | user_id (FK)     |
+    | title             | | name        | | content        | | token_hash       |
+    | content           | | created_at  | | created_by     | | expires_at       |
+    | is_favorited      | +------+------+ | created_at     | | revoked          |
+    | is_archived       |        |        +----------------+ | revoked_at       |
+    | is_deleted        |        |                            | user_agent       |
+    | last_edited_by    |        | N:M                        | ip_address       |
+    | created_at        |        |                            | created_at       |
+    | updated_at        |   +----+----------+                 +------------------+
+    +--------+----------+   |  note_tags    |
+             |              +---------------+
+             |              | note_id (FK)  |
+             |              | tag_id (FK)   |
+             |              | created_at    |
+             |              +---------------+
+             | 1:N
+             |
+             v
+    +-------------------------+
+    |  push_subscriptions     |
+    +-------------------------+
+    | id (PK)                 |
+    | user_id (FK)            |
+    | endpoint                |
+    | p256dh                  |
+    | auth                    |
+    | created_at              |
+    +-------------------------+
 
+    +-------------------------+
+    |  active_sessions        |
+    +-------------------------+
+    | id (PK)                 |
+    | note_id (FK)            |
+    | user_id (FK)            |
+    | cursor_line             |
+    | cursor_column           |
+    | last_seen_at            |
+    | created_at              |
+    +-------------------------+
 ```
 
 ### Table Definitions
 
 #### Users Table
+
 ```sql
 CREATE TABLE users (
 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -525,6 +577,7 @@ CREATE INDEX idx_users_preferences ON users USING GIN(preferences);
 ```
 
 #### Notes Table
+
 ```sql
 CREATE TABLE notes (
 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -539,18 +592,17 @@ created_at TIMESTAMPTZ DEFAULT NOW(),
 updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Performance indexes
 CREATE INDEX idx_notes_user_id ON notes(user_id);
 CREATE INDEX idx_notes_user_filters ON notes(user_id, is_deleted, is_archived, is_favorited, updated_at DESC);
 CREATE INDEX idx_notes_user_favorited ON notes(user_id, updated_at DESC) WHERE is_favorited = true;
 CREATE INDEX idx_notes_user_archived ON notes(user_id, updated_at DESC) WHERE is_archived = true;
 
--- Full-text search
 CREATE INDEX idx_notes_content_search ON notes USING GIN (to_tsvector('english', content));
 CREATE INDEX idx_notes_title_search ON notes USING GIN (to_tsvector('english', title));
 ```
 
 #### Revisions Table
+
 ```sql
 CREATE TABLE revisions (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -562,7 +614,6 @@ CREATE TABLE revisions (
 
 CREATE INDEX idx_revisions_note_id ON revisions(note_id, created_at DESC);
 
--- Automatic revision trigger
 CREATE TRIGGER trigger_create_note_revision
     BEFORE UPDATE ON notes
     FOR EACH ROW
@@ -570,6 +621,7 @@ CREATE TRIGGER trigger_create_note_revision
 ```
 
 #### Tags Tables
+
 ```sql
 CREATE TABLE tags (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -588,6 +640,7 @@ CREATE TABLE note_tags (
 ```
 
 #### Refresh Tokens
+
 ```sql
 CREATE TABLE refresh_tokens (
 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -606,7 +659,23 @@ CREATE INDEX idx_refresh_tokens_hash ON refresh_tokens(token_hash) WHERE NOT rev
 CREATE INDEX idx_refresh_tokens_expires ON refresh_tokens(expires_at) WHERE NOT revoked;
 ```
 
+#### Push Subscriptions
+
+```sql
+CREATE TABLE push_subscriptions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_push_subscriptions_user_id ON push_subscriptions(user_id);
+```
+
 #### Active Sessions
+
 ```sql
 CREATE TABLE active_sessions (
 id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -619,43 +688,43 @@ created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX idx_active_sessions_note_id ON active_sessions(note_id);
-CREATE INDEX idx_active_sessions_user_id ON active_sessions(user_id);
+CREATE INDEX idx_active_sessions_user_id ON active_sessions(user_id)
 WHERE last_seen_at > NOW() - INTERVAL '5 minutes';
 ```
 
 ### Database Optimizations
 
-- **Composite Indexes** - Fast user-specific queries
-- **Full-Text Search** - GIN indexes for content search
-- **Foreign Key Constraints** - Referential integrity
-- **Cascade Deletes** - Automatic cleanup of related data
-- **Automatic Timestamps** - Trigger-based updated_at
-- **Soft Deletes** - Recovery of deleted notes
-- **Connection Pooling** - Efficient resource usage
+- Composite indexes for fast user-specific queries
+- GIN indexes for full-text search
+- Foreign key constraints for referential integrity
+- Cascade deletes for automatic cleanup of related data
+- Trigger-based updated_at timestamps
+- Soft deletes for note recovery
+- Connection pooling for efficient resource usage
 
 ---
 
-## 🔄 WebSocket Integration
+## WebSocket Integration
 
 ### Connection Flow
 
-```rust
+```
 Client connects: ws://api/v1/notes/{note_id}/ws
-└─ Authorization: Bearer <token> (OR ?token=<token> for native browser WS)
++-- Authorization: Bearer <token> (OR ?token=<token> for native browser WS)
 
 Server verifies JWT and note access
-└─ Creates active_session record
++-- Creates active_session record
 
 Client sends cursor moves or edits
-└─ Broadcast to all connections for this note
-└─ Publish to Redis for other instances
++-- Broadcast to all connections for this note
++-- Publish to Redis for other instances
 
 Client receives updates from other users
-└─ Update UI with changes and cursor positions
++-- Update UI with changes and cursor positions
 
 Client disconnects
-└─ Delete active_session record
-└─ Broadcast "user_left" event
++-- Delete active_session record
++-- Broadcast "user_left" event
 ```
 
 ### Message Types
@@ -699,14 +768,14 @@ Client disconnects
 ### Multi-Instance Sync
 
 ```
-Instance 1 ──┐
-             ├─→ Redis Pub/Sub ──→ All Instances
-Instance 2 ──┘
+Instance 1 --+
+             +-> Redis Pub/Sub --> All Instances
+Instance 2 --+
 ```
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 ### Cloud Database Setup
 
@@ -714,8 +783,9 @@ Instance 2 ──┘
 
 1. Go to [supabase.com](https://supabase.com/)
 2. Create new project
-3. Get connection string from **Settings → Database**
+3. Get connection string from **Settings -> Database**
 4. Use **Session Mode** connection pooler:
+
 ```env
 DATABASE_URL=postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].pooler.supabase.com:5432/postgres
 ```
@@ -725,6 +795,7 @@ DATABASE_URL=postgresql://postgres.[PROJECT_REF]:[PASSWORD]@aws-0-[REGION].poole
 1. Go to [upstash.com](https://upstash.com/)
 2. Create Redis database
 3. Copy connection string:
+
 ```env
 REDIS_URL=rediss://default:[PASSWORD]@[ENDPOINT].upstash.io:6379
 ```
@@ -777,126 +848,153 @@ MAX_NOTE_SIZE=102400
 MAX_NOTES_PER_USER=50
 RATE_LIMIT_ANONYMOUS=20
 RATE_LIMIT_AUTHENTICATED=100
+
+# Email (Brevo - 300 emails/day free)
+BREVO_API_KEY=<your-brevo-api-key>
+EMAIL_FROM=noreply@noteflow.app
+APP_URL=<frontend-url>
+
+# Avatar Upload (ImgBB)
+IMGBB_API_KEY=<your-imgbb-api-key>
+
+# Web Push VAPID (auto-generated if empty)
+VAPID_PUBLIC_KEY=
+VAPID_PRIVATE_KEY=
+VAPID_SUBJECT=mailto:notifications@noteflow.app
 ```
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
 ```
 noteflow-backend/
-├── 📄 Cargo.toml                     # Rust dependencies
-├── 📄 .env.example                   # Environment template
-├── 📄 Dockerfile                     # Container build
-├── 📄 docker-compose.yml             # Local dev stack
-├── 📄 README.md                      # This file
-├── 📄 LICENSE                        # MIT License
-│
-├── 📁 migrations/                    # Database migrations
-│   ├── 20251208000001_create_users.sql
-│   ├── 20251208000002_create_notes.sql
-│   ├── 20251208000003_create_revisions.sql
-│   ├── 20251208000004_create_tags.sql
-│   ├── 20251208000005_create_active_sessions.sql
-│   ├── 20251213000006_enhance_notes.sql
-│   ├── 20251213000007_enhance_users.sql
-│   ├── 20251213000008_create_refresh_tokens.sql
-│   └── 20251213000009_fix_active_sessions.sql
-│
-└── 📁 src/
-    ├── 📄 main.rs                    # Application entry
-    ├── 📄 lib.rs                     # Library exports
-    ├── 📄 config.rs                  # Configuration
-    │
-    ├── 📁 utils/                     # Utilities
-    │   ├── mod.rs
-    │   ├── errors.rs                 # Error handling
-    │   ├── jwt.rs                    # JWT manager
-    │   └── validation.rs             # Input validation
-    │
-    ├── 📁 models/                    # Data models
-    │   ├── mod.rs
-    │   ├── user.rs                   # User model
-    │   ├── note.rs                   # Note model
-    │   ├── revision.rs               # Revision model
-    │   ├── tag.rs                    # Tag model
-    │   ├── session.rs                # Active session mode
-    │   └── collaboration.rs          # WebSocket message types
-    │
-    ├── 📁 db/                        # Database layer
-    │   ├── mod.rs
-    │   ├── postgres.rs               # PostgreSQL pool
-    │   └── redis.rs                  # Redis manager
-    │
-    ├── 📁 services/                  # Business logic
-    │   ├── mod.rs
-    │   ├── auth_service.rs           # Authentication
-    │   ├── note_service.rs           # Note operations
-    │   ├── tag_service.rs            # Tag management
-    │   ├── user_service.rs           # User profile management
-    │   └── collaboration_service.rs  # Real-time collaboration
-    │
-    ├── 📁 handlers/                  # HTTP handlers
-    │   ├── mod.rs
-    │   ├── auth.rs                   # Auth endpoints
-    │   ├── notes.rs                  # Note endpoints
-    │   ├── tags.rs                   # Tag management endpoints
-    │   ├── users.rs                  # User profile endpoints
-    │   ├── search.rs                 # Search endpoint
-    │   └── websocket.rs              # WebSocket handler
-    │
-    └── 📁 middleware/                # Middleware
-        ├── mod.rs
-        ├── auth.rs                   # JWT verification
-        └── rate_limit.rs             # Rate limiting
++-- Cargo.toml                          # Rust dependencies
++-- .env.example                        # Environment template
++-- Dockerfile                          # Container build
++-- docker-compose.yml                  # Local dev stack
++-- README.md                           # This file
++-- LICENSE                             # MIT License
+
++-- .sqlx/                              # SQLx offline query cache (builds without live DB)
+
++-- migrations/                         # Database migrations
+|   +-- 20251208000001_create_users.sql
+|   +-- 20251208000002_create_notes.sql
+|   +-- 20251208000003_create_revisions.sql
+|   +-- 20251208000004_create_tags.sql
+|   +-- 20251208000005_create_active_sessions.sql
+|   +-- 20251213000006_enhance_notes.sql
+|   +-- 20251213000007_enhance_users.sql
+|   +-- 20251213000008_create_refresh_tokens.sql
+|   +-- 20251213000009_fix_active_sessions.sql
+|   +-- 20251213000010_create_push_subscriptions.sql
+
++-- src/
+    +-- main.rs                         # Application entry
+    +-- lib.rs                          # Library exports
+    +-- config.rs                       # Configuration
+
+    +-- models/                         # Data models
+    |   +-- mod.rs
+    |   +-- user.rs                     # User model
+    |   +-- note.rs                     # Note model
+    |   +-- revision.rs                 # Revision model
+    |   +-- tag.rs                      # Tag model
+    |   +-- session.rs                  # Active session model
+    |   +-- collaboration.rs            # WebSocket message types
+
+    +-- db/                             # Database layer
+    |   +-- mod.rs
+    |   +-- postgres.rs                 # PostgreSQL pool
+    |   +-- redis.rs                    # Redis manager
+
+    +-- services/                       # Business logic
+    |   +-- mod.rs
+    |   +-- auth_service.rs             # Authentication
+    |   +-- note_service.rs             # Note operations
+    |   +-- tag_service.rs              # Tag management
+    |   +-- user_service.rs             # User profile management
+    |   +-- revision_service.rs         # Version history
+    |   +-- notification_service.rs     # Push + email notifications
+    |   +-- collaboration_service.rs    # Real-time collaboration
+
+    +-- handlers/                       # HTTP handlers
+    |   +-- mod.rs
+    |   +-- auth.rs                     # Auth endpoints
+    |   +-- notes.rs                    # Note endpoints
+    |   +-- tags.rs                     # Tag management endpoints
+    |   +-- users.rs                    # User profile endpoints
+    |   +-- notifications.rs            # Push notification endpoints
+    |   +-- revisions.rs                # Version history endpoints
+    |   +-- search.rs                   # Search endpoint
+    |   +-- websocket.rs                # WebSocket handler
+
+    +-- middleware/                     # Middleware
+    |   +-- mod.rs
+    |   +-- auth.rs                     # JWT verification
+    |   +-- rate_limit.rs               # Rate limiting
+
+    +-- utils/                          # Utilities
+        +-- mod.rs
+        +-- errors.rs                   # Error handling
+        +-- jwt.rs                      # JWT manager
+        +-- validation.rs               # Input validation
+        +-- web_push.rs                 # Pure Rust Web Push encryption
 ```
 
 ---
 
-## 🔒 Security
+## Security
 
 ### Authentication
-- **JWT Tokens** - Industry-standard JSON Web Tokens
-- **Token Expiration** - Short-lived access (24h) + refresh (7d)
-- **Stateless Design** - No server-side session storage
-- **Secure Defaults** - HS256 algorithm with strong secrets
+- JWT tokens with HS256 algorithm
+- Short-lived access tokens (1h) and long-lived refresh tokens (30d)
+- Session listing and revocation capabilities
+- Stateless design with no server-side session storage
 
 ### Password Security
-- **Bcrypt Hashing** - Industry-standard with cost factor 10
-- **Salt Generation** - Unique salt per password
-- **No Plain Text** - Passwords never stored or logged
-- **Timing-Safe Comparison** - Prevents timing attacks
+- Bcrypt hashing with configurable cost factor (default 10)
+- Unique salt generation per password
+- Passwords never stored or logged in plain text
+- Timing-safe comparison to prevent timing attacks
 
 ### Input Validation
-- **Email Validation** - RFC 5322 compliant
-- **Password Strength** - Minimum 8 characters
-- **Content Sanitization** - Trim and validate all inputs
-- **Size Limits** - Configurable maximum sizes
-- **SQL Injection Prevention** - Parameterized queries
+- RFC 5322 compliant email validation
+- Minimum 8-character password requirement
+- Content sanitization and size limits on all inputs
+- Parameterized queries prevent SQL injection
 
 ### Rate Limiting
-- **IP-Based Throttling** - Sliding window algorithm
-- **Anonymous Limits** - 20 requests/minute
-- **Authenticated Limits** - 100 requests/minute
-- **Background Cleanup** - Prevents memory leaks
+- IP-based sliding window algorithm
+- Anonymous: 20 requests/minute
+- Authenticated: 100 requests/minute
+- Background cleanup prevents memory leaks
+
+### Push Notification Security
+- VAPID authentication with signed JWT per push request
+- AES-256-GCM payload encryption with ECDH key agreement
+- Pure Rust cryptography implementation (no system OpenSSL)
+- No shared push secrets across endpoints
 
 ### Additional Measures
-- **CORS Configuration** - Controlled origin access
-- **TLS Support** - HTTPS enforcement in production
-- **Error Sanitization** - No sensitive data in errors
-- **Structured Logging** - Audit trail without secrets
+- Configurable CORS origin policies
+- HTTPS enforcement in production
+- Error responses sanitized of sensitive data
+- Graceful shutdown handler (SIGTERM/SIGINT)
+- Structured logging with no secrets in output
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Please follow these guidelines:
+Contributions are welcome. Please follow these guidelines:
 
-1. **Fork the repository**
-2. **Create feature branch** (`git checkout -b feature/AmazingFeature`)
-3. **Commit changes** (`git commit -m 'Add AmazingFeature'`)
-4. **Push to branch** (`git push origin feature/AmazingFeature`)
-5. **Open Pull Request**
+1. Fork the repository
+2. Create feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to branch (`git push origin feature/AmazingFeature`)
+5. Open Pull Request
 
 ### Development Guidelines
 
@@ -908,23 +1006,21 @@ Contributions are welcome! Please follow these guidelines:
 
 ---
 
-## 📄 License
+## License
 
-Distributed under the [**MIT License**](LICENSE). See `LICENSE` file for more information.
+Distributed under the [MIT License](LICENSE). See `LICENSE` file for more information.
 
 ---
 
-## 📧 Contact
+## Contact
 
-**Zaud Rehman** - [@RehmanZaud](https://x.com/RehmanZaud) · [LinkedIn](https://www.linkedin.com/in/zaud-rehman-31514a288/) · zaudrehman@gmail.com
+**Zaud Rehman** - [@RehmanZaud](https://x.com/RehmanZaud) | [LinkedIn](https://www.linkedin.com/in/zaud-rehman-31514a288/) | zaudrehman@gmail.com
 
 **Project Link**: [https://github.com/ZaudRehman/noteflow-backend-v1](https://github.com/ZaudRehman/noteflow-backend-v1)
 
 ---
 
-## 🙏 Acknowledgments
-
-Built with these amazing open-source technologies:
+## Acknowledgments
 
 - [Rust](https://www.rust-lang.org/) - Systems programming language
 - [Axum](https://github.com/tokio-rs/axum) - Web framework
@@ -934,15 +1030,3 @@ Built with these amazing open-source technologies:
 - [Redis](https://redis.io/) - In-memory store
 - [Supabase](https://supabase.com/) - Database hosting
 - [Upstash](https://upstash.com/) - Redis hosting
-
----
-
-<div align="center">
-
-### ⭐ Star this repository if you find it helpful!
-
-**Built with 🦀 Rust and ❤️ for performance**
-
-[⬆ Back to Top](#noteflow-backend-)
-
-</div>

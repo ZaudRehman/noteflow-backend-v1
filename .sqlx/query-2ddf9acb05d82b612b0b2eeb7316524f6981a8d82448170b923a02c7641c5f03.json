@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS(\n                SELECT 1 FROM refresh_tokens\n                WHERE token_hash = $1\n                    AND NOT revoked\n                    AND expires_at > NOW()\n            )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "exists",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2ddf9acb05d82b612b0b2eeb7316524f6981a8d82448170b923a02c7641c5f03"
+}

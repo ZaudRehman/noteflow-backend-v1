@@ -3,22 +3,111 @@ use axum::extract::ws::{Message, WebSocket};
 use chrono::Utc;
 use futures::{sink::SinkExt, stream::StreamExt};
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, RwLock};
 use uuid::Uuid;
 
+use crate::db::RedisManager;
 use crate::models::{collaboration::*, user::User};
 use crate::utils::errors::{AppError, Result};
 
 pub struct CollaborationService {
     pool: PgPool,
     tx: broadcast::Sender<WsMessage>,
+    redis: Option<Arc<RedisManager>>,
+    redis_url: String,
+    /// Track which notes have active Redis subscribers to avoid duplicates
+    note_subscribers: Arc<RwLock<HashMap<Uuid, ()>>>,
 }
 
 impl CollaborationService {
-    pub fn new(pool: PgPool) -> Arc<Self> {
+    pub fn new(
+        pool: PgPool,
+        redis: Option<Arc<RedisManager>>,
+        redis_url: &str,
+    ) -> Arc<Self> {
         let (tx, _) = broadcast::channel(1000);
-        Arc::new(Self { pool, tx })
+        Arc::new(Self {
+            pool,
+            tx,
+            redis,
+            redis_url: redis_url.to_string(),
+            note_subscribers: Arc::new(RwLock::new(HashMap::new())),
+        })
+    }
+
+    /// Publish to both local in-memory broadcast AND Redis (for other instances)
+    fn publish(&self, msg: &WsMessage) {
+        // Local broadcast
+        let _ = self.tx.send(msg.clone());
+
+        // Redis broadcast (cross-instance)
+        if let Some(ref redis) = self.redis {
+            if let Ok(json) = serde_json::to_string(msg) {
+                let note_id = match msg {
+                    WsMessage::NoteCreated { note_id, .. }
+                    | WsMessage::NoteUpdated { note_id, .. }
+                    | WsMessage::NoteDeleted { note_id, .. }
+                    | WsMessage::CursorMove { note_id, .. }
+                    | WsMessage::UserJoined { note_id, .. }
+                    | WsMessage::UserLeft { note_id, .. } => note_id,
+                    _ => return,
+                };
+                let channel = format!("note:{}", note_id);
+                let _ = redis.publish(&channel, &json);
+            }
+        }
+    }
+
+    /// Ensure a Redis subscriber exists for this note (spawned once per note)
+    async fn ensure_redis_subscriber(&self, note_id: Uuid) {
+        let mut subscribers = self.note_subscribers.write().await;
+        if subscribers.contains_key(&note_id) {
+            return; // Already subscribed
+        }
+
+        subscribers.insert(note_id, ());
+
+        let channel = format!("note:{}", note_id);
+        let redis_url = self.redis_url.clone();
+        let tx = self.tx.clone();
+
+        // Drop the lock before spawning the task
+        drop(subscribers);
+
+        if redis_url.is_empty() {
+            return;
+        }
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            use redis::Client;
+
+            let client = match Client::open(redis_url) {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let conn = match client.get_async_connection().await {
+                Ok(c) => c,
+                Err(_) => return,
+            };
+            let mut pubsub = conn.into_pubsub();
+            if pubsub.subscribe(&channel).await.is_err() {
+                return;
+            }
+
+            let mut stream = pubsub.on_message();
+            while let Some(msg) = stream.next().await {
+                let payload: String = msg.get_payload().unwrap_or_default();
+                if payload.is_empty() {
+                    continue;
+                }
+                if let Ok(ws_msg) = serde_json::from_str::<WsMessage>(&payload) {
+                    let _ = tx.send(ws_msg);
+                }
+            }
+        });
     }
 
     pub async fn handle_connection(self: Arc<Self>, ws: WebSocket, user: User, note_id: Uuid) {
@@ -34,6 +123,9 @@ impl CollaborationService {
         }
 
         tracing::info!("User {} joined note {} collaboration", user.id, note_id);
+
+        // Ensure Redis subscriber exists for this note
+        self.ensure_redis_subscriber(note_id).await;
 
         let (sender, mut receiver) = ws.split();
         let mut rx = self.tx.subscribe();
@@ -51,9 +143,8 @@ impl CollaborationService {
             user_name: user.display_name.clone(),
             timestamp: Utc::now(),
         };
-        let _ = self.tx.send(join_msg);
+        self.publish(&join_msg);
 
-        // Clone values needed for the spawned tasks
         let user_id = user.id;
         let user_name = user.display_name.clone();
         let service_clone = Arc::clone(&self);
@@ -61,11 +152,9 @@ impl CollaborationService {
         // Create channel for sending messages to WebSocket
         let (ws_tx, mut ws_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
 
-        // Spawn task to forward broadcast messages to this WebSocket
+        // Spawn task to forward messages to WebSocket
         let sender_task = tokio::spawn(async move {
             let mut sender = sender;
-
-            // Forward messages from ws_rx to actual WebSocket
             while let Some(msg) = ws_rx.recv().await {
                 if sender.send(msg).await.is_err() {
                     break;
@@ -78,7 +167,6 @@ impl CollaborationService {
             let ws_tx = ws_tx.clone();
             tokio::spawn(async move {
                 while let Ok(msg) = rx.recv().await {
-                    // Filter messages for this note and don't echo user's own cursor moves
                     let should_send = match &msg {
                         WsMessage::CursorMove {
                             note_id: msg_note_id,
@@ -119,7 +207,6 @@ impl CollaborationService {
                     if let Ok(msg) = serde_json::from_str::<WsMessage>(&text) {
                         match msg {
                             WsMessage::CursorMove { position, .. } => {
-                                // Update cursor position in database
                                 let _ = service_clone
                                     .create_or_update_session(
                                         note_id,
@@ -129,7 +216,6 @@ impl CollaborationService {
                                     )
                                     .await;
 
-                                // Broadcast cursor position
                                 let broadcast_msg = WsMessage::CursorMove {
                                     note_id,
                                     user_id,
@@ -137,10 +223,9 @@ impl CollaborationService {
                                     position,
                                     timestamp: Utc::now(),
                                 };
-                                let _ = service_clone.tx.send(broadcast_msg);
+                                service_clone.publish(&broadcast_msg);
                             }
                             WsMessage::NoteUpdated { content_delta, .. } => {
-                                // Broadcast note update to other users
                                 let broadcast_msg = WsMessage::NoteUpdated {
                                     note_id,
                                     user_id,
@@ -148,10 +233,9 @@ impl CollaborationService {
                                     content_delta,
                                     timestamp: Utc::now(),
                                 };
-                                let _ = service_clone.tx.send(broadcast_msg);
+                                service_clone.publish(&broadcast_msg);
                             }
                             WsMessage::Ping { .. } => {
-                                // Respond with pong
                                 let pong = WsMessage::Pong {
                                     timestamp: Utc::now(),
                                 };
@@ -191,7 +275,7 @@ impl CollaborationService {
             user_id,
             timestamp: Utc::now(),
         };
-        let _ = self.tx.send(leave_msg);
+        self.publish(&leave_msg);
 
         tracing::info!("User {} left note {} collaboration", user_id, note_id);
     }

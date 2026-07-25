@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.name \n            FROM tags t\n            INNER JOIN note_tags nt ON t.id = nt.tag_id\n            WHERE nt.note_id = $1\n            ORDER BY t.name\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "bffd691849254a3b99d7833452ad9b86b7351c23282d24b932edf85939494bf2"
+}

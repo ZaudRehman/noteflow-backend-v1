@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT \n                t.id, \n                t.name, \n                t.created_at, \n                COUNT(DISTINCT nt.note_id) as \"note_count!\"\n            FROM tags t\n            LEFT JOIN note_tags nt ON t.id = nt.tag_id\n            LEFT JOIN notes n ON nt.note_id = n.id AND n.is_deleted = false\n            WHERE t.user_id = $1\n            GROUP BY t.id, t.name, t.created_at\n            ORDER BY t.name ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 3,
+        "name": "note_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "f3c1a55b441d16943ef21d1299b088f53a7f942e73b9cd2ce231c3c101d4422c"
+}

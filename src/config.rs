@@ -16,9 +16,13 @@ pub struct Config {
     pub max_notes_per_user: i64,
     pub max_collaborators_per_note: usize,
     pub cors_allowed_origins: Vec<String>,
-    pub resend_api_key: String,
+    pub brevo_api_key: String,
     pub app_url: String,
     pub email_from: String,
+    pub imgbb_api_key: String,
+    pub vapid_public_key: String,
+    pub vapid_private_key: String,
+    pub vapid_subject: String,
 }
 
 impl Config {
@@ -73,9 +77,14 @@ impl Config {
                 .parse()
                 .unwrap_or(10),
             cors_allowed_origins: cors_origins,
-            resend_api_key: env::var("RESEND_API_KEY").unwrap_or_default(),
+            brevo_api_key: env::var("BREVO_API_KEY").unwrap_or_default(),
             app_url: env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),
-            email_from: env::var("EMAIL_FROM").unwrap_or_else(|_| "onboarding@resend.dev".to_string()),
+            email_from: env::var("EMAIL_FROM").unwrap_or_else(|_| "noreply@noteflow.app".to_string()),
+            imgbb_api_key: env::var("IMGBB_API_KEY").unwrap_or_default(),
+            vapid_public_key: env::var("VAPID_PUBLIC_KEY").unwrap_or_default(),
+            vapid_private_key: env::var("VAPID_PRIVATE_KEY").unwrap_or_default(),
+            vapid_subject: env::var("VAPID_SUBJECT")
+                .unwrap_or_else(|_| "mailto:notifications@noteflow.app".to_string()),
         })
     }
 }

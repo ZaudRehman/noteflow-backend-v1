@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                s.user_id,\n                u.display_name,\n                s.cursor_line,\n                s.cursor_column\n            FROM active_sessions s\n            INNER JOIN users u ON s.user_id = u.id\n            WHERE s.note_id = $1\n                AND s.last_seen_at > NOW() - INTERVAL '2 minutes'\n            ORDER BY s.last_seen_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "cursor_line",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "cursor_column",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e0d685383ee0441b794d8ba69e8f7df08efde5286ee77a231fbc0e1dee193c43"
+}

@@ -7,6 +7,7 @@ use axum::{
 };
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::signal;
 use tower_http::{
     compression::CompressionLayer,
     cors::CorsLayer,
@@ -17,10 +18,13 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use noteflow_backend::{
     config::Config,
-    db::{create_pool, create_redis_client, run_migrations_if_needed},
+    db::{create_pool, create_redis_client, run_migrations_if_needed, RedisManager},
     handlers,
-    middleware::{auth_middleware, rate_limit_middleware, start_cleanup_task, RateLimiter},
-    services::{AuthService, NoteService, TagService, UserService, CollaborationService},
+    middleware::{auth_middleware, rate_limit_middleware, start_rate_limit_cleanup, RateLimiter},
+    services::{
+        AuthService, CollaborationService, NoteService, NotificationService, RevisionService,
+        TagService, UserService,
+    },
     utils::jwt::JwtManager,
 };
 
@@ -59,9 +63,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     run_migrations_if_needed(&pool).await?;
     tracing::info!("✅ Database migrations complete");
 
-    // Redis connection (optional for MVP)
+    // Redis connection
     tracing::info!("🔴 Connecting to Redis...");
-    let _redis_client = create_redis_client(&config.redis_url).await?;
+    let redis_conn = create_redis_client(&config.redis_url).await?;
+    let redis_manager = Arc::new(RedisManager::new(redis_conn));
     tracing::info!("✅ Redis connected");
 
     // Initialize JWT manager
@@ -76,15 +81,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_service = Arc::new(AuthService::new(pool.clone(), jwt_manager.clone()));
     let note_service = Arc::new(NoteService::new(pool.clone(), config.clone()));
     let tag_service = Arc::new(TagService::new(pool.clone()));
-    let user_service = Arc::new(UserService::new(pool.clone()));
-    let collab_service = CollaborationService::new(pool.clone());
+    let user_service = Arc::new(UserService::new(pool.clone(), config.clone()));
+    let revision_service = Arc::new(RevisionService::new(pool.clone()));
+    let notification_service = Arc::new(NotificationService::new(pool.clone(), Arc::new(config.clone())));
+    let collab_service = CollaborationService::new(
+        pool.clone(),
+        Some(redis_manager.clone()),
+        &config.redis_url,
+    );
     tracing::info!("✅ All services initialized");
 
-    // Rate limiters
-    let anonymous_limiter = Arc::new(RateLimiter::new(config.rate_limit_anonymous, 60));
-    let auth_limiter = Arc::new(RateLimiter::new(config.rate_limit_authenticated, 60));
-    start_cleanup_task(anonymous_limiter.clone());
-    start_cleanup_task(auth_limiter.clone());
+    // Rate limiters (Redis-backed with in-memory fallback)
+    let anonymous_limiter = Arc::new(RateLimiter::new(
+        config.rate_limit_anonymous,
+        60,
+        Some(redis_manager.clone()),
+    ));
+    let auth_limiter = Arc::new(RateLimiter::new(
+        config.rate_limit_authenticated,
+        60,
+        Some(redis_manager.clone()),
+    ));
+    start_rate_limit_cleanup(anonymous_limiter.clone());
+    start_rate_limit_cleanup(auth_limiter.clone());
     tracing::info!("✅ Rate limiters initialized");
 
     // Parse CORS allowed origins
@@ -114,6 +133,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let auth_routes = Router::new()
         .route("/api/v1/auth/me", get(handlers::auth::get_current_user))
         .route("/api/v1/auth/logout", post(handlers::auth::logout))
+        .route("/api/v1/auth/sessions", get(handlers::auth::list_sessions))
+        .route("/api/v1/auth/sessions/:session_id", delete(handlers::auth::revoke_session))
         .with_state(auth_service);
 
     // === NOTE ROUTES ===
@@ -147,12 +168,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/users/profile", get(handlers::users::get_profile))
         .route("/api/v1/users/profile", put(handlers::users::update_profile))
         .route("/api/v1/users/preferences", put(handlers::users::update_preferences))
+        .route("/api/v1/users/avatar", post(handlers::users::upload_avatar))
         .with_state(user_service);
 
     // === SEARCH ROUTE ===
     let search_route = Router::new()
         .route("/api/v1/search", get(handlers::notes::search))
         .with_state(note_service);
+
+    // === NOTIFICATION ROUTES ===
+    let notification_routes = Router::new()
+        .route("/api/v1/notifications/push/subscriptions", get(handlers::notifications::list_push_subscriptions))
+        .route("/api/v1/notifications/push/subscribe", post(handlers::notifications::push_subscribe))
+        .route("/api/v1/notifications/push/subscribe/:id", delete(handlers::notifications::push_unsubscribe))
+        .with_state(notification_service);
+
+    // === REVISION HISTORY ROUTES ===
+    let revision_routes = Router::new()
+        .route("/api/v1/notes/:note_id/history", get(handlers::revisions::list_revisions))
+        .route("/api/v1/notes/:note_id/history/:revision_id", get(handlers::revisions::get_revision))
+        .route("/api/v1/notes/:note_id/history/:revision_id/restore", post(handlers::revisions::restore_revision))
+        .with_state(revision_service);
 
     // === WEBSOCKET COLLABORATION ===
     let ws_route = Router::new()
@@ -166,6 +202,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(tag_routes)
         .merge(user_routes)
         .merge(search_route)
+        .merge(notification_routes)
+        .merge(revision_routes)
         .merge(ws_route)
         .layer(middleware::from_fn_with_state(
             (jwt_manager.clone(), pool.clone()),
@@ -197,7 +235,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     axum::http::header::CONTENT_TYPE,
                     axum::http::header::ACCEPT,
                 ])
-                .allow_credentials(true),
+                .allow_credentials(true)
+                .max_age(std::time::Duration::from_secs(86400)),
         )
         // Compression
         .layer(CompressionLayer::new())
@@ -219,9 +258,35 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
 
+    tracing::info!("👋 Server shutdown complete");
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => { tracing::info!("Received Ctrl+C, starting graceful shutdown..."); }
+        _ = terminate => { tracing::info!("Received SIGTERM, starting graceful shutdown..."); }
+    }
 }
 
 async fn health_check() -> &'static str {
@@ -240,6 +305,8 @@ fn print_api_endpoints() {
     tracing::info!("  === Auth (Protected) ===");
     tracing::info!("  GET    /api/v1/auth/me");
     tracing::info!("  POST   /api/v1/auth/logout");
+    tracing::info!("  GET    /api/v1/auth/sessions");
+    tracing::info!("  DELETE /api/v1/auth/sessions/:session_id");
     tracing::info!("  === Notes (Protected) ===");
     tracing::info!("  GET    /api/v1/notes");
     tracing::info!("  POST   /api/v1/notes");
@@ -256,12 +323,21 @@ fn print_api_endpoints() {
     tracing::info!("  GET    /api/v1/tags/:id/notes");
     tracing::info!("  POST   /api/v1/notes/:note_id/tags");
     tracing::info!("  DELETE /api/v1/notes/:note_id/tags/:tag_id");
-    tracing::info!("  === User (Protected) ===");
+    tracing::info!("  === Users (Protected) ===");
     tracing::info!("  GET    /api/v1/users/profile");
     tracing::info!("  PUT    /api/v1/users/profile");
     tracing::info!("  PUT    /api/v1/users/preferences");
+    tracing::info!("  POST   /api/v1/users/avatar");
+    tracing::info!("  === Notifications (Protected) ===");
+    tracing::info!("  GET    /api/v1/notifications/push/subscriptions");
+    tracing::info!("  POST   /api/v1/notifications/push/subscribe");
+    tracing::info!("  DELETE /api/v1/notifications/push/subscribe/:id");
     tracing::info!("  === Search (Protected) ===");
     tracing::info!("  GET    /api/v1/search?q=query");
+    tracing::info!("  === Revisions (Protected) ===");
+    tracing::info!("  GET    /api/v1/notes/:note_id/history");
+    tracing::info!("  GET    /api/v1/notes/:note_id/history/:revision_id");
+    tracing::info!("  POST   /api/v1/notes/:note_id/history/:revision_id/restore");
     tracing::info!("  === WebSocket (Protected) ===");
     tracing::info!("  WS     /api/v1/notes/:id/ws");
 }

@@ -1,17 +1,21 @@
 // src/handlers/auth.rs
 use crate::models::user::{
     AuthResponse, ForgotPasswordRequest, LoginRequest, LogoutRequest, LogoutResponse,
-    RefreshTokenRequest, RegisterRequest, ResetPasswordRequest, User, UserProfile,
+    RefreshTokenRequest, RegisterRequest, ResetPasswordRequest, SessionListResponse, User,
+    UserProfile,
 };
 use crate::services::AuthService;
 use crate::utils::errors::Result;
 use axum::{
-    extract::State,
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     Extension, Json,
 };
 use chrono::Utc;
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use uuid::Uuid;
 
 /// POST /api/v1/auth/register - Register new user
 pub async fn register(
@@ -137,6 +141,43 @@ pub async fn logout(
     Ok(Json(LogoutResponse {
         message: "Successfully logged out".into(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SessionListQuery {
+    pub current_token: Option<String>,
+}
+
+/// GET /api/v1/auth/sessions - List active sessions
+pub async fn list_sessions(
+    State(auth_service): State<Arc<AuthService>>,
+    Extension(user): Extension<User>,
+    Query(query): Query<SessionListQuery>,
+) -> Result<Json<SessionListResponse>> {
+    let current_hash = query
+        .current_token
+        .map(|t| {
+            let mut hasher = Sha256::new();
+            hasher.update(t.as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
+        .unwrap_or_default();
+
+    let sessions = auth_service.list_sessions(user.id, &current_hash).await?;
+    Ok(Json(sessions))
+}
+
+/// DELETE /api/v1/auth/sessions/:session_id - Revoke a specific session
+pub async fn revoke_session(
+    State(auth_service): State<Arc<AuthService>>,
+    Extension(user): Extension<User>,
+    Path(session_id): Path<Uuid>,
+) -> Result<(StatusCode, Json<serde_json::Value>)> {
+    auth_service.revoke_session(session_id, user.id).await?;
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({ "message": "Session revoked" })),
+    ))
 }
 
 /// POST /api/v1/auth/forgot-password - Request password reset
