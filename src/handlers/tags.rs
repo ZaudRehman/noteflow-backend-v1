@@ -13,13 +13,21 @@ use crate::models::{tag::*, user::User};
 use crate::services::TagService;
 use crate::utils::errors::Result;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct TagNotesQuery {
     pub page: Option<i64>,
     pub limit: Option<i64>,
 }
 
 /// GET /api/v1/tags
+#[utoipa::path(
+    get,
+    path = "/api/v1/tags",
+    tag = "Tags",
+    responses(
+        (status = 200, description = "List of tags", body = TagListResponse),
+    ),
+)]
 pub async fn list_tags(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -29,6 +37,16 @@ pub async fn list_tags(
 }
 
 /// POST /api/v1/tags
+#[utoipa::path(
+    post,
+    path = "/api/v1/tags",
+    tag = "Tags",
+    request_body = CreateTagRequest,
+    responses(
+        (status = 201, description = "Tag created", body = TagResponse),
+        (status = 400, description = "Validation error"),
+    ),
+)]
 pub async fn create_tag(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -40,6 +58,18 @@ pub async fn create_tag(
 }
 
 /// GET /api/v1/tags/:id
+#[utoipa::path(
+    get,
+    path = "/api/v1/tags/{id}",
+    tag = "Tags",
+    params(
+        ("id", description = "Tag UUID"),
+    ),
+    responses(
+        (status = 200, description = "Tag retrieved", body = TagResponse),
+        (status = 404, description = "Tag not found"),
+    ),
+)]
 pub async fn get_tag(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -50,6 +80,18 @@ pub async fn get_tag(
 }
 
 /// PUT /api/v1/tags/:id
+#[utoipa::path(
+    put,
+    path = "/api/v1/tags/{id}",
+    tag = "Tags",
+    request_body = UpdateTagRequest,
+    params(
+        ("id", description = "Tag UUID"),
+    ),
+    responses(
+        (status = 200, description = "Tag updated", body = TagResponse),
+    ),
+)]
 pub async fn update_tag(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -61,6 +103,17 @@ pub async fn update_tag(
 }
 
 /// DELETE /api/v1/tags/:id
+#[utoipa::path(
+    delete,
+    path = "/api/v1/tags/{id}",
+    tag = "Tags",
+    params(
+        ("id", description = "Tag UUID"),
+    ),
+    responses(
+        (status = 204, description = "Tag deleted"),
+    ),
+)]
 pub async fn delete_tag(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -71,6 +124,19 @@ pub async fn delete_tag(
 }
 
 /// POST /api/v1/notes/:note_id/tags
+#[utoipa::path(
+    post,
+    path = "/api/v1/notes/{note_id}/tags",
+    tag = "Tags",
+    request_body = AddTagRequest,
+    params(
+        ("note_id", description = "Note UUID"),
+    ),
+    responses(
+        (status = 201, description = "Tag added to note"),
+        (status = 400, description = "Validation error"),
+    ),
+)]
 pub async fn add_tag_to_note(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -87,6 +153,18 @@ pub async fn add_tag_to_note(
 }
 
 /// DELETE /api/v1/notes/:note_id/tags/:tag_id
+#[utoipa::path(
+    delete,
+    path = "/api/v1/notes/{note_id}/tags/{tag_id}",
+    tag = "Tags",
+    params(
+        ("note_id", description = "Note UUID"),
+        ("tag_id", description = "Tag UUID"),
+    ),
+    responses(
+        (status = 204, description = "Tag removed from note"),
+    ),
+)]
 pub async fn remove_tag_from_note(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,
@@ -99,6 +177,18 @@ pub async fn remove_tag_from_note(
 }
 
 /// GET /api/v1/tags/:id/notes
+#[utoipa::path(
+    get,
+    path = "/api/v1/tags/{id}/notes",
+    tag = "Tags",
+    params(
+        ("id", description = "Tag UUID"),
+        TagNotesQuery,
+    ),
+    responses(
+        (status = 200, description = "Notes with tag", body = NoteListResponse),
+    ),
+)]
 pub async fn get_notes_by_tag(
     State(tag_service): State<Arc<TagService>>,
     Extension(user): Extension<User>,

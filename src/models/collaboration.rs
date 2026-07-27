@@ -1,9 +1,10 @@
 // src/models/collaboration.rs
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 use uuid::Uuid;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum WsMessage {
     #[serde(rename = "note:created")]
@@ -88,9 +89,43 @@ pub enum WsMessage {
 
     #[serde(rename = "pong")]
     Pong { timestamp: DateTime<Utc> },
+
+    // === CRDT Operations ===
+
+    #[serde(rename = "op:insert")]
+    OpInsert {
+        note_id: Uuid,
+        client_id: String,
+        position: usize,
+        text: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "op:delete")]
+    OpDelete {
+        note_id: Uuid,
+        client_id: String,
+        position: usize,
+        length: usize,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "op:sync_request")]
+    OpSyncRequest {
+        note_id: Uuid,
+        last_known_id: i64,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "op:sync_batch")]
+    OpSyncBatch {
+        note_id: Uuid,
+        ops: Vec<CollabOpData>,
+        timestamp: DateTime<Utc>,
+    },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CursorPosition {
     pub line: u32,
     pub column: u32,
@@ -105,4 +140,25 @@ pub struct ActiveSession {
     pub cursor_column: i32,
     pub last_seen_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct NoteCollaborator {
+    pub note_id: Uuid,
+    pub user_id: Uuid,
+    pub permission: String,
+    pub invited_by: Uuid,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow, ToSchema)]
+pub struct CollabOpData {
+    pub id: i64,
+    pub note_id: Uuid,
+    pub client_id: String,
+    pub op_type: String,
+    pub position: i32,
+    pub text_content: Option<String>,
+    pub length: Option<i32>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }

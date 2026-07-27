@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use crate::models::user::User;
 use crate::utils::{errors::AppError, jwt::JwtManager};
+use tracing::Span;
 
 /// Middleware to authenticate requests using JWT tokens
 /// Extracts the Bearer token from Authorization header, verifies it,fetches the user from database and injects user into request extensions
@@ -102,6 +103,7 @@ pub async fn auth_middleware(
     })?;
 
     tracing::debug!("Authenticated user: {} ({})", user.email, user.id);
+    Span::current().record("user_id", &tracing::field::display(user.id));
 
     // Insert user into request extensions for handlers to access
     req.extensions_mut().insert(user);

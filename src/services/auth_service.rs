@@ -16,6 +16,8 @@ use sqlx::{FromRow, PgPool};
 use std::sync::Arc;
 use uuid::Uuid;
 use crate::config::Config;
+use crate::middleware::RateLimiter;
+use crate::services::NotificationService;
 use serde_json::json;
 
 #[derive(Debug, FromRow)]
@@ -35,11 +37,13 @@ struct User {
 pub struct AuthService {
     pool: PgPool,
     jwt_manager: Arc<JwtManager>,
+    login_limiter: Arc<RateLimiter>,
+    notification_service: Arc<NotificationService>,
 }
 
 impl AuthService {
-    pub fn new(pool: PgPool, jwt_manager: Arc<JwtManager>) -> Self {
-        Self { pool, jwt_manager }
+    pub fn new(pool: PgPool, jwt_manager: Arc<JwtManager>, login_limiter: Arc<RateLimiter>, notification_service: Arc<NotificationService>) -> Self {
+        Self { pool, jwt_manager, login_limiter, notification_service }
     }
 
     pub async fn register(&self, req: RegisterRequest) -> Result<AuthResponse> {
@@ -47,6 +51,12 @@ impl AuthService {
         validation::validate_password(&req.password)?;
 
         let email = validation::sanitize_string(&req.email).to_lowercase();
+        let (allowed, _) = self.login_limiter.check_rate_limit(&email).await;
+        if !allowed {
+            tracing::warn!("Registration rate limit exceeded for email: {}", email);
+            return Err(AppError::RateLimitExceeded);
+        }
+
         let display_name = validation::sanitize_string(&req.display_name);
 
         // Check if email already exists
@@ -107,7 +117,13 @@ impl AuthService {
     pub async fn login(&self, req: LoginRequest) -> Result<AuthResponse> {
         let email = validation::sanitize_string(&req.email).to_lowercase();
 
-        // Fetch user - use query_as for dynamic queries
+        let (allowed, _) = self.login_limiter.check_rate_limit(&email).await;
+        if !allowed {
+            tracing::warn!("Login rate limit exceeded for email: {}", email);
+            return Err(AppError::RateLimitExceeded);
+        }
+
+        // Fetch user with lockout info - use query_as for dynamic queries
         let user = sqlx::query_as::<_, User>(
             r#"SELECT 
                 id, 
@@ -128,21 +144,51 @@ impl AuthService {
         .await?
         .ok_or_else(|| AppError::AuthenticationError("Invalid credentials".to_string()))?;
 
+        // Check if account is locked
+        let not_locked: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM users WHERE id = $1 AND (locked_until IS NULL OR locked_until <= NOW()))",
+        )
+        .bind(user.id)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(false);
+
+        if !not_locked {
+            tracing::warn!("Locked account login attempt for user {}", user.id);
+            return Err(AppError::RateLimitExceeded);
+        }
+
         // Verify password
         let password_valid = bcrypt::verify(&req.password, &user.password_hash)
             .map_err(|e| AppError::InternalError(format!("Password verification failed: {}", e)))?;
 
         if !password_valid {
+            // Increment failed attempts and lock if threshold reached
+            sqlx::query(
+                r#"
+                UPDATE users 
+                SET failed_login_attempts = failed_login_attempts + 1,
+                    locked_until = CASE 
+                        WHEN failed_login_attempts + 1 >= 10 THEN NOW() + INTERVAL '15 minutes'
+                        ELSE locked_until
+                    END
+                WHERE id = $1
+                "#,
+            )
+            .bind(user.id)
+            .execute(&self.pool)
+            .await?;
+
             return Err(AppError::AuthenticationError(
                 "Invalid credentials".to_string(),
             ));
         }
 
-        // Update last login timestamp
-        sqlx::query!(
-            "UPDATE users SET last_login_at = NOW() WHERE id = $1",
-            user.id
+        // Success: reset failed attempts and lockout, update last login
+        sqlx::query(
+            "UPDATE users SET last_login_at = NOW(), failed_login_attempts = 0, locked_until = NULL WHERE id = $1",
         )
+        .bind(user.id)
         .execute(&self.pool)
         .await?;
 
@@ -512,6 +558,11 @@ impl AuthService {
         )
         .execute(&self.pool)
         .await?;
+
+        self.notification_service
+            .notify_password_changed(user.id)
+            .await
+            .ok();
 
         tracing::info!("Password reset successful for user {}", user.id);
         Ok(())

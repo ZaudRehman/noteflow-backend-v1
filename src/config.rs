@@ -20,10 +20,11 @@ pub struct Config {
     pub brevo_api_key: String,
     pub app_url: String,
     pub email_from: String,
-    pub imgbb_api_key: String,
+    pub imagekit_private_key: String,
     pub vapid_public_key: String,
     pub vapid_private_key: String,
     pub vapid_subject: String,
+    pub self_url: String,
 }
 
 impl Config {
@@ -85,11 +86,15 @@ impl Config {
             brevo_api_key: env::var("BREVO_API_KEY").unwrap_or_default(),
             app_url: env::var("APP_URL").unwrap_or_else(|_| "http://localhost:3000".to_string()),
             email_from: env::var("EMAIL_FROM").unwrap_or_else(|_| "noreply@noteflow.app".to_string()),
-            imgbb_api_key: env::var("IMGBB_API_KEY").unwrap_or_default(),
+            imagekit_private_key: env::var("IMAGEKIT_PRIVATE_KEY").unwrap_or_default(),
             vapid_public_key: env::var("VAPID_PUBLIC_KEY").unwrap_or_default(),
             vapid_private_key: env::var("VAPID_PRIVATE_KEY").unwrap_or_default(),
             vapid_subject: env::var("VAPID_SUBJECT")
                 .unwrap_or_else(|_| "mailto:notifications@noteflow.app".to_string()),
+            self_url: env::var("SELF_URL")
+                .unwrap_or_else(|_| format!("http://{}:{}", 
+                    env::var("HOST").unwrap_or_else(|_| "localhost".to_string()), 
+                    env::var("PORT").unwrap_or_else(|_| "8080".to_string()))),
         })
     }
 }

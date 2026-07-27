@@ -10,7 +10,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 use uuid::Uuid;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
 pub struct PushSubscribeRequest {
     pub endpoint: String,
     pub p256dh_key: String,
@@ -19,6 +19,16 @@ pub struct PushSubscribeRequest {
 }
 
 /// POST /api/v1/notifications/push/subscribe
+#[utoipa::path(
+    post,
+    path = "/api/v1/notifications/push/subscribe",
+    tag = "Notifications",
+    request_body = PushSubscribeRequest,
+    responses(
+        (status = 201, description = "Subscribed to push notifications"),
+        (status = 400, description = "Validation error"),
+    ),
+)]
 pub async fn push_subscribe(
     State(notification_service): State<Arc<NotificationService>>,
     Extension(user): Extension<User>,
@@ -36,6 +46,18 @@ pub async fn push_subscribe(
 }
 
 /// DELETE /api/v1/notifications/push/subscribe/:id
+#[utoipa::path(
+    delete,
+    path = "/api/v1/notifications/push/subscribe/{id}",
+    tag = "Notifications",
+    params(
+        ("id", description = "Subscription ID"),
+    ),
+    responses(
+        (status = 200, description = "Unsubscribed from push notifications"),
+        (status = 404, description = "Subscription not found"),
+    ),
+)]
 pub async fn push_unsubscribe(
     State(notification_service): State<Arc<NotificationService>>,
     Extension(user): Extension<User>,
@@ -52,6 +74,14 @@ pub async fn push_unsubscribe(
 }
 
 /// GET /api/v1/notifications/push/subscriptions
+#[utoipa::path(
+    get,
+    path = "/api/v1/notifications/push/subscriptions",
+    tag = "Notifications",
+    responses(
+        (status = 200, description = "List of push subscriptions", body = inline(serde_json::Value)),
+    ),
+)]
 pub async fn list_push_subscriptions(
     State(notification_service): State<Arc<NotificationService>>,
     Extension(user): Extension<User>,

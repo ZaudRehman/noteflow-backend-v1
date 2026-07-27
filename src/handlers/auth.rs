@@ -15,7 +15,20 @@ use chrono::Utc;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
+use utoipa::ToSchema;
 use uuid::Uuid;
+
+/// POST /api/v1/auth/register - Register new user
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/register",
+    tag = "Authentication",
+    request_body = RegisterRequest,
+    responses(
+        (status = 201, description = "User registered successfully", body = AuthResponse),
+        (status = 400, description = "Validation error"),
+    ),
+)]
 
 /// POST /api/v1/auth/register - Register new user
 pub async fn register(
@@ -59,6 +72,16 @@ pub async fn register(
 }
 
 /// POST /api/v1/auth/login - Authenticate user
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/login",
+    tag = "Authentication",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = AuthResponse),
+        (status = 401, description = "Invalid credentials"),
+    ),
+)]
 pub async fn login(
     State(auth_service): State<Arc<AuthService>>,
     headers: HeaderMap,
@@ -100,6 +123,16 @@ pub async fn login(
 }
 
 /// POST /api/v1/auth/refresh - Refresh access token
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/refresh",
+    tag = "Authentication",
+    request_body = RefreshTokenRequest,
+    responses(
+        (status = 200, description = "Tokens refreshed successfully", body = inline(serde_json::Value)),
+        (status = 401, description = "Invalid refresh token"),
+    ),
+)]
 pub async fn refresh(
     State(auth_service): State<Arc<AuthService>>,
     Json(req): Json<RefreshTokenRequest>,
@@ -118,6 +151,15 @@ pub async fn refresh(
 }
 
 /// GET /api/v1/auth/me - Get current user profile
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/me",
+    tag = "Authentication",
+    responses(
+        (status = 200, description = "Current user profile", body = UserProfile),
+        (status = 401, description = "Unauthorized"),
+    ),
+)]
 pub async fn get_current_user(
     Extension(user): Extension<User>,
     State(auth_service): State<Arc<AuthService>>,
@@ -127,6 +169,16 @@ pub async fn get_current_user(
 }
 
 /// POST /api/v1/auth/logout - Revoke refresh token
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/logout",
+    tag = "Authentication",
+    request_body = LogoutRequest,
+    responses(
+        (status = 200, description = "Logged out successfully", body = LogoutResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+)]
 pub async fn logout(
     State(auth_service): State<Arc<AuthService>>,
     Extension(user): Extension<User>,
@@ -143,12 +195,22 @@ pub async fn logout(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]
 pub struct SessionListQuery {
     pub current_token: Option<String>,
 }
 
 /// GET /api/v1/auth/sessions - List active sessions
+#[utoipa::path(
+    get,
+    path = "/api/v1/auth/sessions",
+    tag = "Authentication",
+    params(SessionListQuery),
+    responses(
+        (status = 200, description = "List of active sessions", body = SessionListResponse),
+        (status = 401, description = "Unauthorized"),
+    ),
+)]
 pub async fn list_sessions(
     State(auth_service): State<Arc<AuthService>>,
     Extension(user): Extension<User>,
@@ -168,6 +230,18 @@ pub async fn list_sessions(
 }
 
 /// DELETE /api/v1/auth/sessions/:session_id - Revoke a specific session
+#[utoipa::path(
+    delete,
+    path = "/api/v1/auth/sessions/{session_id}",
+    tag = "Authentication",
+    params(
+        ("session_id", description = "Session ID"),
+    ),
+    responses(
+        (status = 200, description = "Session revoked", body = inline(serde_json::Value)),
+        (status = 404, description = "Session not found"),
+    ),
+)]
 pub async fn revoke_session(
     State(auth_service): State<Arc<AuthService>>,
     Extension(user): Extension<User>,
@@ -181,6 +255,16 @@ pub async fn revoke_session(
 }
 
 /// POST /api/v1/auth/forgot-password - Request password reset
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/forgot-password",
+    tag = "Authentication",
+    request_body = ForgotPasswordRequest,
+    responses(
+        (status = 200, description = "Password reset email sent"),
+        (status = 400, description = "Invalid email"),
+    ),
+)]
 pub async fn forgot_password(
     State(auth_service): State<Arc<AuthService>>,
     Json(req): Json<ForgotPasswordRequest>,
@@ -194,6 +278,16 @@ pub async fn forgot_password(
 }
 
 /// POST /api/v1/auth/reset-password - Reset password with token
+#[utoipa::path(
+    post,
+    path = "/api/v1/auth/reset-password",
+    tag = "Authentication",
+    request_body = ResetPasswordRequest,
+    responses(
+        (status = 200, description = "Password reset successful"),
+        (status = 400, description = "Invalid or expired token"),
+    ),
+)]
 pub async fn reset_password(
     State(auth_service): State<Arc<AuthService>>,
     Json(req): Json<ResetPasswordRequest>,

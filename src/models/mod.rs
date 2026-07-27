@@ -7,6 +7,7 @@ pub mod tag;
 pub mod user;
 
 pub use collaboration::ActiveSession as CollabSession;
+pub use collaboration::NoteCollaborator;
 pub use note::ActiveUserInfo;
 pub use revision::*;
 pub use session::ActiveSession;

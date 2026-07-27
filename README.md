@@ -2,7 +2,7 @@
 
 A production-grade REST API for real-time collaborative note-taking built with Rust, Axum, PostgreSQL, and Redis.
 
-[Live Demo](https://noteflow-frontend-phi.vercel.app/) · [API Docs](#api-documentation) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend)
+[Live Demo](https://noteflow-frontend-phi.vercel.app/) · [API Docs](https://noteflow-backend-v1.onrender.com/docs) · [Frontend UI](https://github.com/ZaudRehman/noteflow-frontend)
 
 ---
 
@@ -27,18 +27,19 @@ A production-grade REST API for real-time collaborative note-taking built with R
 
 ## About
 
-NoteFlow Backend is a high-performance REST API built with Rust that powers a collaborative note-taking application. It demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication, and cloud-native deployment.
+NoteFlow Backend is a high-performance REST API built with Rust that powers a collaborative note-taking application. It demonstrates modern backend development practices including asynchronous programming, JWT authentication, real-time WebSocket communication, CRDT-based conflict resolution, push notifications, and cloud-native deployment.
 
 ### Capabilities
 
 - **High Performance** - Built with Rust for sub-200ms p95 response times
-- **Enterprise Security** - JWT authentication, bcrypt hashing, rate limiting
-- **Scalable Architecture** - Async/await patterns, connection pooling, horizontal scaling
-- **Real-Time Sync** - WebSocket support with Redis pub/sub for multi-instance coordination
+- **Enterprise Security** - JWT authentication, bcrypt hashing, rate limiting, account lockout
+- **Scalable Architecture** - Async/await patterns, connection pooling, horizontal scaling through Redis pub/sub
+- **Real-Time Sync** - WebSocket support with CRDT operation relay for conflict-free collaborative editing
 - **Version Control** - Automatic revision history via PostgreSQL triggers
+- **Collaboration** - Permission-based sharing with owner/edit/view roles
 - **Smart Organization** - Tag system with many-to-many relationships
-- **Production Ready** - Comprehensive error handling, structured logging, health checks
-- **Cloud Native** - Docker support, Supabase/Upstash integration, multiple deployment options
+- **Observability** - Prometheus metrics, structured JSON logging, request tracing, health checks
+- **Cloud Native** - Docker support, Supabase/Upstash integration, OpenAPI docs
 
 ---
 
@@ -46,76 +47,97 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 
 ### Authentication & Authorization
 - JWT dual-token system with access (1h) and refresh (30d) tokens
-- Secure password storage with bcrypt hashing
-- Seamless token refresh without re-authentication
-- Session listing and revocation
+- Secure password storage with bcrypt hashing (cost factor 12)
+- Token rotation — refresh tokens are one-time-use
+- Session listing and revocation across devices
 - User registration, login, and management
+- Account lockout after 10 failed attempts (15-minute lock)
+- Per-email brute-force rate limiter (5 req/60s)
 
 ### Note Management
 - Full CRUD operations with ownership verification
-- Favorites and archive organization
-- Soft delete with 30-day recovery window
-- Advanced filtering by favorite, archive, tags, and search query
+- Favorites and archive organization (toggle endpoints)
+- Soft delete with filter exclusion
+- Advanced filtering by favorite, archived, tag, with sorting
 - Paginated retrieval with configurable page sizes
-- Sorting by created, updated, or title with ASC/DESC
-- Configurable content limits (100KB max, 500 notes per user)
+- Sorting by created_at, updated_at, or title (ASC/DESC)
+- Configurable content limits (5MB max via request body limit)
+
+### Collaboration & Sharing
+- Permission-based collaborator system (owner, edit, view)
+- Invite collaborators by email
+- Update/revoke collaborator permissions
+- Real-time collaborative editing via CRDT operation relay
+- Live cursor position broadcasting
+- Active user presence tracking
 
 ### Tag System
-- User-specific tags with unique names
-- Many-to-many relationships between notes and tags
-- Independent tag CRUD operations
-- Note count statistics per tag
-- Batch tag operations on notes
-- Tag-based note filtering
+- User-unique tags with many-to-many note relationships
+- Full CRUD operations with note count stats
+- Tag assignment and removal from notes
+- Tag-based note filtering and listing
 
 ### Search & Discovery
-- Full-text search via PostgreSQL GIN indexes
-- Multi-field search across titles and content
-- Relevance-ranked results (title match weighted higher)
-- Fuzzy matching via ILIKE queries
-- Sub-second search response times
+- PostgreSQL full-text search via GIN indexes (`to_tsvector` / `plainto_tsquery`)
+- Stemming-aware (handles "running" → "run", "notes" → "note")
+- Fallback ILIKE matching for partial/fuzzy queries
+- Relevance-ranked results (title matches weighted first)
+- Per-user scope (own notes + notes shared as collaborator)
 
 ### User Management
-- Display name customization
-- Avatar upload via ImgBB CDN (base64 input)
+- Display name and profile management
+- Avatar upload via multipart/form-data — stored on ImageKit CDN (max 5MB, JPEG/PNG/GIF/WebP)
 - Theme preferences (light, dark, system)
-- JSONB custom preferences field
-- Last login activity tracking
-- Password change and reset flows
-- Email notifications via Brevo
+- JSONB custom preferences (language, timezone, editor mode, notification toggles)
+- Password change and reset flows with email notifications
+- Last login tracking
 
 ### Version History
-- Automatic revision snapshots via PostgreSQL triggers
-- Revision browsing with metadata
-- Point-in-time restore to any previous version
-- Author and timestamp tracking per revision
+- Automatic revision snapshots via PostgreSQL trigger on every note update
+- Paginated revision listing with author and timestamps
+- Point-in-time restore to any previous revision
+- Pre-restore snapshot preserves undo capability
 
 ### Push Notifications
 - RFC 8291 Web Push protocol with VAPID authentication
-- Pure Rust cryptography (AES-GCM, ECDH, HKDF, no system OpenSSL)
-- Subscription management (subscribe, unsubscribe, list)
-- Automatic cleanup of expired endpoints (410 responses)
+- Pure Rust cryptography (AES-256-GCM, ECDH, HKDF — no system OpenSSL)
+- Subscription CRUD (subscribe, unsubscribe, list)
+- Automatic cleanup of expired push endpoints (410 responses)
 - Transactional email via Brevo (300 emails/day free)
-- Password change alerts
+- Notifications on note edits by collaborators and password changes
 
-### Real-Time Collaboration
-- Scalable to 1,000+ concurrent WebSocket connections with sub-100ms latency
-- Persistent WebSocket connections for instant updates via Tokio async tasks
-- Active user presence tracking with configurable connection limits
-- Real-time collaborator cursor positions
-- Multi-instance sync via Redis pub/sub with broadcast channel capacity of 100,000
+### Real-Time Collaboration (CRDT/OT)
+- Scalable to 1,000+ concurrent WebSocket connections
+- CRDT operation relay: `op:insert`, `op:delete` stored in `collab_operations` table
+- Late-join sync: `op:sync_request` / `op:sync_batch` for disconnected clients
+- Background task replays unapplied operations against note content (every 10s)
+- Per-user connection limit (max 5 concurrent WS connections)
+- Active user presence with cursor position broadcasting
+- Redis pub/sub for multi-instance cross-cluster messaging
 - Automatic cleanup of stale sessions
-- Message types: note updates, cursor moves, user join/leave
-- Connection pool tuning and async task management for high throughput
+
+### Observability & Operations
+- Prometheus metrics endpoint (`GET /metrics`) with latency histograms
+- Structured JSON logging via `tracing-subscriber` with `flatten_event`
+- Request-scoped UUIDs (`X-Request-Id`) across every request
+- Span-based tracing with `method`, `uri`, `status_code`, `user_id`
+- Health check endpoint with DB/Redis status + structured JSON response (503 on DB down)
+- OpenAPI 3.0 docs at `/docs` with interactive Swagger UI
+- Graceful shutdown (SIGTERM/SIGINT) with in-flight request draining
 
 ### Security & Performance
-- IP-based rate limiting (20/min anonymous, 100/min authenticated)
-- Comprehensive input validation and sanitization
+- Global request body size limit (5MB via `RequestBodyLimitLayer`)
+- IP-based rate limiting with `X-RateLimit-Limit` / `X-RateLimit-Remaining` headers
+- Per-email brute-force protection (5 req/60s on login/register)
+- Account lockout (10 failures → 15-min lock)
+- WS connection rate limiting (max 5 per user)
 - SQL injection prevention via parameterized queries
+- bcrypt password hashing with per-password salts
 - Configurable CORS policies
-- Connection pooling (20 max connections)
-- Composite indexes for fast lookups
-- Automatic gzip response compression
+- Gzip response compression
+- Composite + GIN indexes for query performance
+- In-memory cache layer for tags and notification subscriptions (TTL-based)
+- Cursor-based pagination for large result sets
 
 ---
 
@@ -175,44 +197,52 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 NoteFlow Backend follows a clean layered architecture:
 
 ```
-+---------------------------------------------------------------+
-|                       Axum Web Server                          |
-|                    (Tower Middleware Stack)                    |
-+---------------------------------------------------------------+
-|  Middleware Layer                                              |
-|  +-- CORS                    (Cross-origin resource sharing)   |
-|  +-- Compression             (Gzip compression)                |
-|  +-- Request Tracing         (Structured logging)              |
-|  +-- Rate Limiting           (IP-based throttling)             |
-|  +-- Authentication          (JWT verification)                |
-+---------------------------------------------------------------+
-|  Presentation Layer (HTTP Handlers)                            |
-|  +-- Auth Routes             (register, login, refresh)        |
-|  +-- Note Routes             (CRUD operations)                 |
-|  +-- Revision Routes         (history, restore)                |
-|  +-- Tag Routes              (tag management)                  |
-|  +-- WebSocket Handler       (real-time messaging)             |
-+---------------------------------------------------------------+
-|  Business Logic Layer (Services)                               |
-|  +-- AuthService             (authentication & tokens)         |
-|  +-- NoteService             (note operations)                 |
-|  +-- UserService             (user management)                 |
-|  +-- TagService              (tagging system)                  |
-|  +-- RevisionService         (version history)                 |
-|  +-- NotificationService     (push + email notifications)      |
-|  +-- CollaborationService    (real-time sync)                  |
-+---------------------------------------------------------------+
-|  Data Access Layer                                             |
-|  +-- SQLx Queries            (parameterized SQL)               |
-|  +-- Connection Pool         (PostgreSQL sessions)             |
-|  +-- Redis Manager           (pub/sub, caching)                |
-|  +-- Migration Manager       (schema versioning)               |
-+---------------------------------------------------------------+
-|  Infrastructure                                                |
-|  +-- PostgreSQL 15+          (primary data store)              |
-|  +-- Redis 7+                (cache & pub/sub)                 |
-|  +-- File System             (static assets)                   |
-+---------------------------------------------------------------+
++--------------------------------------------------------------------+
+|                       Axum Web Server                              |
+|                    (Tower Middleware Stack)                        |
++--------------------------------------------------------------------+
+|  Middleware Layer  (applied outermost → innermost for incoming)    |
+|  +-- Extension(PrometheusHandle)    (metrics recorder injection)   |
+|  +-- CORS                           (cross-origin resource sharing)|
+|  +-- RequestBodyLimit               (5MB limit)                    |
+|  +-- Compression                    (gzip response compression)    |
+|  +-- RequestId                      (UUID per request)             |
+|  +-- TraceLayer                     (structured span logging)      |
+|  +-- Rate Limiting                  (IP-based + per-email)         |
+|  +-- Authentication                 (JWT verification)             |
++--------------------------------------------------------------------+
+|  Presentation Layer (HTTP + WebSocket Handlers)                    |
+|  +-- Auth Routes              (register, login, refresh, sessions) |
+|  +-- Note Routes              (CRUD, favorite, archive, export)    |
+|  +-- Revision Routes          (history, restore)                   |
+|  +-- Tag Routes               (tag CRUD, assignment)               |
+|  +-- Collaborator Routes      (share, permission management)       | 
+|  +-- User Routes              (profile, preferences, avatar)       |
+|  +-- Notification Routes      (push subscribe/unsubscribe)         |
+|  +-- Search Route             (full-text search)                   |
+|  +-- WebSocket Handler        (CRDT relay, cursor broadcast)       |
+|  +-- Health / Metrics / Docs  (observability)                      |
++--------------------------------------------------------------------+
+|  Business Logic Layer (Services)                                   |
+|  +-- AuthService             (authentication, tokens, lockout)     |
+|  +-- NoteService             (note CRUD, batch loading, cache)     |
+|  +-- UserService             (profile, avatar, preferences)        |
+|  +-- TagService              (tag CRUD, note assignment)           |
+|  +-- NoteCollaboratorService (permission management)               |
+|  +-- RevisionService         (version history)                     |
+|  +-- NotificationService     (Web Push + Brevo email)              |
+|  +-- CollaborationService    (WS lifecycle, CRDT relay, sync)      |
++--------------------------------------------------------------------+
+|  Data Access Layer                                                 |
+|  +-- SQLx (raw queries + compile-time macros)                      |
+|  +-- PostgreSQL Connection Pool     (up to 20 sessions)            |
+|  +-- Redis Connection Manager       (pub/sub, caching)             |
+|  +-- Migration Manager              (sqlx::migrate!)               |
++--------------------------------------------------------------------+
+|  Infrastructure                                                    |
+|  +-- PostgreSQL 15+               (primary data store)             |
+|  +-- Redis 7+                     (pub/sub, limiter counters)      |
++--------------------------------------------------------------------+
 ```
 
 ### Design Patterns
@@ -277,39 +307,33 @@ Edit `.env` with your credentials:
 # Server
 HOST=0.0.0.0
 PORT=8080
-RUST_LOG=info,noteflow_backend=debug
+RUST_LOG=info
 
 # PostgreSQL (Local or Supabase)
 DATABASE_URL=postgresql://user:password@localhost:5432/noteflow
-DATABASE_MAX_CONNECTIONS=20
 
 # Redis (Local or Upstash)
 REDIS_URL=redis://localhost:6379
-# Or for Upstash: rediss://default:password@endpoint.upstash.io:6379
 
 # JWT (Generate: openssl rand -base64 32)
 JWT_SECRET=your-super-secret-key-minimum-32-characters
-JWT_ACCESS_EXPIRATION=86400
-JWT_REFRESH_EXPIRATION=604800
+ENCRYPTION_KEY=0123456789abcdef0123456789abcdef   # 32 hex chars for AES-GCM
 
-# Email (Brevo - 300 emails/day free)
+# Email (Brevo — 300 emails/day free)
 BREVO_API_KEY=
-EMAIL_FROM=noreply@noteflow.app
-APP_URL=http://localhost:3000
+BREVO_FROM_EMAIL=noreply@noteflow.app
 
-# Avatar Upload (ImgBB - 1000 images, 32MB max)
-IMGBB_API_KEY=
+# Frontend URL (used in reset password email links)
+SELF_URL=http://localhost:8080
 
-# Web Push VAPID Keys (optional - auto-generated if empty)
+# Web Push VAPID Keys (optional — auto-generated if empty)
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:notifications@noteflow.app
 
-# Limits
-MAX_NOTE_SIZE=102400
-MAX_NOTES_PER_USER=50
-RATE_LIMIT_ANONYMOUS=20
-RATE_LIMIT_AUTHENTICATED=100
+# ImageKit (free tier avatar CDN — get keys from https://imagekit.io)
+IMAGEKIT_PRIVATE_KEY=
+
 ```
 
 #### 4. Setup database
@@ -342,7 +366,8 @@ cargo build --release
 # Health check
 curl http://localhost:8080/health
 
-# Expected response: "OK"
+# Expected response: (JSON with DB + Redis status)
+{"status":"ok","version":"0.1.0","database":true,"redis":true,"timestamp":"..."}
 ```
 
 ### Docker Setup (Alternative)
@@ -362,6 +387,8 @@ docker-compose down
 
 ## API Documentation
 
+Interactive Swagger UI available at [`/docs`](https://noteflow-backend-v1.onrender.com/docs) (auto-generated via `utoipa`).
+
 ### Base URL
 
 ```
@@ -378,13 +405,22 @@ Authorization: Bearer <access_token>
 
 ### Endpoints Overview
 
+#### Public
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check (DB + Redis status, structured JSON) |
+| `GET` | `/metrics` | Prometheus metrics (latency histograms, request counts) |
+| `GET` | `/docs` | Interactive Swagger UI |
+| `GET` | `/api-docs/openapi.json` | Raw OpenAPI 3.0 spec |
+
 #### Authentication (Public)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/v1/auth/register` | Register new user (also stores refresh token) |
+| `POST` | `/api/v1/auth/register` | Register new user (stores refresh token) |
 | `POST` | `/api/v1/auth/login` | Login (stores refresh token, updates last_login) |
-| `POST` | `/api/v1/auth/refresh` | Refresh access token |
+| `POST` | `/api/v1/auth/refresh` | Refresh access + refresh token (rotation) |
 | `POST` | `/api/v1/auth/forgot-password` | Request password reset email |
 | `POST` | `/api/v1/auth/reset-password` | Reset password with token |
 
@@ -394,32 +430,48 @@ Authorization: Bearer <access_token>
 |--------|----------|-------------|
 | `GET` | `/api/v1/auth/me` | Get current user profile |
 | `POST` | `/api/v1/auth/logout` | Revoke refresh token |
-| `GET` | `/api/v1/auth/sessions` | List active sessions |
+| `GET` | `/api/v1/auth/sessions` | List active sessions (user-agent, IP, dates) |
 | `DELETE` | `/api/v1/auth/sessions/:session_id` | Revoke specific session |
 
 #### Notes (Protected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/notes` | List notes (filters: favorites/archived/all) |
+| `GET` | `/api/v1/notes?filter=&tag_id=&sort_by=&sort_order=&page=&limit=` | List notes with advanced filtering |
 | `POST` | `/api/v1/notes` | Create new note |
-| `GET` | `/api/v1/notes/:id` | Get specific note with tags |
-| `PUT` | `/api/v1/notes/:id` | Update note |
+| `GET` | `/api/v1/notes/:id` | Get note with tags, collaborators, active users |
+| `PUT` | `/api/v1/notes/:id` | Update note (triggers push notification to owner) |
 | `DELETE` | `/api/v1/notes/:id` | Soft delete note |
 | `POST` | `/api/v1/notes/:id/favorite` | Toggle favorite status |
 | `POST` | `/api/v1/notes/:id/archive` | Toggle archive status |
+| `GET` | `/api/v1/notes/:id/export?format=json\|markdown` | Export note content |
 
-#### Tags
+#### Collaborators (Protected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/v1/tags` | List all user tags with note counts |
+| `GET` | `/api/v1/notes/:note_id/collaborators` | List collaborators with permissions |
+| `POST` | `/api/v1/notes/:note_id/collaborators` | Invite collaborator by email |
+| `PUT` | `/api/v1/notes/:note_id/collaborators/:target_user_id` | Change collaborator permission |
+| `DELETE` | `/api/v1/notes/:note_id/collaborators/:target_user_id` | Remove collaborator |
+
+#### Tags (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/tags` | List all tags with note counts |
 | `POST` | `/api/v1/tags` | Create new tag |
-| `PUT` | `/api/v1/tags/:id` | Update tag name |
-| `DELETE` | `/api/v1/tags/:id` | Delete tag |
-| `GET` | `/api/v1/tags/:id/notes` | Get all notes with this tag |
-| `POST` | `/api/v1/notes/:note_id/tags` | Add tag to note |
+| `PUT` | `/api/v1/tags/:id` | Rename tag |
+| `DELETE` | `/api/v1/tags/:id` | Delete tag (removes associations, keeps notes) |
+| `GET` | `/api/v1/tags/:id/notes` | List notes with this tag |
+| `POST` | `/api/v1/notes/:note_id/tags` | Assign tag to note |
 | `DELETE` | `/api/v1/notes/:note_id/tags/:tag_id` | Remove tag from note |
+
+#### Search (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/search?q=&page=&limit=` | Full-text search across notes (FTS + ILIKE fallback) |
 
 #### Version History (Protected)
 
@@ -429,55 +481,42 @@ Authorization: Bearer <access_token>
 | `GET` | `/api/v1/notes/:note_id/history/:revision_id` | Get specific revision content |
 | `POST` | `/api/v1/notes/:note_id/history/:revision_id/restore` | Restore note to revision |
 
+#### User Profile (Protected)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/v1/users/profile` | Get full profile with preferences |
+| `PUT` | `/api/v1/users/profile` | Update display name / avatar URL |
+| `PUT` | `/api/v1/users/preferences` | Save theme, language, timezone, editor mode, toggles |
+| `POST` | `/api/v1/users/avatar` | Upload avatar (multipart/form-data, max 5MB) |
+
 #### Push Notifications (Protected)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/v1/notifications/push/subscriptions` | List push subscriptions |
-| `POST` | `/api/v1/notifications/push/subscribe` | Subscribe to push notifications |
-| `DELETE` | `/api/v1/notifications/push/subscribe/:id` | Unsubscribe from push notifications |
+| `POST` | `/api/v1/notifications/push/subscribe` | Subscribe browser to push |
+| `DELETE` | `/api/v1/notifications/push/subscribe/:id` | Unsubscribe from push |
 
-#### User Profile (Protected)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/v1/users/profile` | Get user profile |
-| `PUT` | `/api/v1/users/profile` | Update profile (name) |
-| `PUT` | `/api/v1/users/preferences` | Update preferences (theme, custom JSON) |
-| `POST` | `/api/v1/users/avatar` | Upload avatar (base64 image, ImgBB CDN) |
-
-#### Search (Protected)
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/api/v1/search?q=query` | Full-text search across notes |
-
-#### WebSocket (Protected)
+#### WebSocket (Protected — token as query param)
 
 | Protocol | Endpoint | Description |
 |----------|----------|-------------|
-| `WS` | `/api/v1/notes/:id/ws` | Real-time collaboration |
-
-#### Health Check
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | API health status |
+| `WS` | `/api/v1/notes/:id/ws?token=<access_token>` | Real-time collaboration (CRDT ops, cursors, presence) |
 
 ### HTTP Status Codes
 
 | Code | Status | Usage |
 |------|--------|-------|
-| `200` | OK | Successful GET, PUT requests |
-| `201` | Created | Successful POST requests |
-| `204` | No Content | Successful DELETE requests |
-| `400` | Bad Request | Invalid input/validation errors |
-| `401` | Unauthorized | Missing or invalid authentication |
-| `403` | Forbidden | Insufficient permissions |
-| `404` | Not Found | Resource doesn't exist |
-| `409` | Conflict | Duplicate resource (email exists) |
-| `429` | Too Many Requests | Rate limit exceeded |
-| `500` | Internal Server Error | Server-side errors |
+| `200` | OK | Successful GET, PUT, POST requests |
+| `201` | Created | Successful resource creation |
+| `204` | No Content | Successful delete operations |
+| `400` | Bad Request | Validation error (invalid input, missing field) |
+| `401` | Unauthorized | Missing or invalid access token |
+| `403` | Forbidden | Insufficient permissions (view-only collaborator) |
+| `404` | Not Found | Resource doesn't exist or no access |
+| `429` | Too Many Requests | Rate limit exceeded or account locked |
+| `500` | Internal Server Error | Server-side error |
 
 ---
 
@@ -486,71 +525,89 @@ Authorization: Bearer <access_token>
 ### Entity Relationship Diagram
 
 ```
-                    +----------------------------+
-                    |         users              |
-                    +----------------------------+
-                    | id (PK, UUID)              |
-                    | email (UNIQUE)             |
-                    | password_hash              |
-                    | display_name               |
-                    | avatar_url                 |
-                    | theme                      |
-                    | preferences (JSONB)        |
-                    | reset_token                |
-                    | reset_token_expires        |
-                    | last_login_at              |
-                    | created_at                 |
-                    | updated_at                 |
-                    +----------+-----------------+
-                               |
-                               | 1:N
-              +----------------+----------------+------------------+
-              |                |                |                  |
-              v                v                v                  v
-    +-------------------+ +-------------+ +----------------+ +------------------+
-    |      notes        | |    tags     | |   revisions    | | refresh_tokens   |
-    +-------------------+ +-------------+ +----------------+ +------------------+
-    | id (PK)           | | id (PK)     | | id (PK)        | | id (PK)          |
-    | user_id (FK)      | | user_id(FK) | | note_id (FK)   | | user_id (FK)     |
-    | title             | | name        | | content        | | token_hash       |
-    | content           | | created_at  | | created_by     | | expires_at       |
-    | is_favorited      | +------+------+ | created_at     | | revoked          |
-    | is_archived       |        |        +----------------+ | revoked_at       |
-    | is_deleted        |        |                            | user_agent       |
-    | last_edited_by    |        | N:M                        | ip_address       |
-    | created_at        |        |                            | created_at       |
-    | updated_at        |   +----+----------+                 +------------------+
-    +--------+----------+   |  note_tags    |
-             |              +---------------+
-             |              | note_id (FK)  |
-             |              | tag_id (FK)   |
-             |              | created_at    |
-             |              +---------------+
+                    +------------------------------------------+
+                    |                users                     |
+                    +------------------------------------------+
+                    | id (PK, UUID)                            |
+                    | email (UNIQUE)                           |
+                    | password_hash                            |
+                    | display_name                             |
+                    | avatar_url                               |
+                    | theme                                    |
+                    | preferences (JSONB)                      |
+                    | reset_token                              |
+                    | reset_token_expires                      |
+                    | last_login_at                            |
+                    | failed_login_attempts                    |
+                    | locked_until                             |
+                    | created_at                               |
+                    | updated_at                               |
+                    +--------+-------------------+-------------+
+                             |                   |
+                             | 1:N               | 1:N
+            +----------------+------+    +-------+-----------+
+            |                       |    |                   |
+            v                       v    v                   v
+  +---------------------+ +-------------+ +-----------------------+
+  |       notes         | |    tags     | |  refresh_tokens       |
+  +---------------------+ +-------------+ +-----------------------+
+  | id (PK)             | | id (PK)     | | id (PK)               |
+  | user_id (FK)        | | user_id(FK) | | user_id (FK)          |
+  | title               | | name        | | token_hash            | 
+  | content             | | created_at  | | expires_at            | 
+  | is_favorited        | +------+------+ | revoked               |
+  | is_archived         |        |        | revoked_at            |
+  | is_deleted          |        |        | user_agent            |
+  | last_edited_by (FK) |        | N:M    | ip_address            |
+  | created_at          |        |        | created_at            |
+  | updated_at          |   +----+------+ +-----------------------+
+  +----------+----------+   | note_tags |
+             |              +-----------+
+             |              | note_id   |
+             | 1:N          | tag_id    |
+             |              | created_at|
+             |              +-----------+
+             |
              | 1:N
              |
              v
-    +-------------------------+
-    |  push_subscriptions     |
-    +-------------------------+
-    | id (PK)                 |
-    | user_id (FK)            |
-    | endpoint                |
-    | p256dh                  |
-    | auth                    |
-    | created_at              |
-    +-------------------------+
+  +-------------------------------+
+  |  note_collaborators           |
+  +-------------------------------+
+  | note_id (FK)                  |
+  | user_id (FK)                  |
+  | permission (owner/edit/view)  |
+  | invited_by (FK)               |
+  | created_at                    |
+  +-------------------------------+
+             |
+             | 1:N
+             v
+  +-------------------------------+
+  |  collab_operations            |
+  +-------------------------------+
+  | id (PK, BIGSERIAL)            |
+  | note_id (FK)                  |
+  | client_id                     |
+  | op_type (insert/delete)       |
+  | position (INT)                |
+  | text_content                  |
+  | length (INT)                  |
+  | applied (BOOL)                |
+  | created_at                    |
+  +-------------------------------+
 
-    +-------------------------+
-    |  active_sessions        |
-    +-------------------------+
-    | id (PK)                 |
-    | note_id (FK)            |
-    | user_id (FK)            |
-    | cursor_line             |
-    | cursor_column           |
-    | last_seen_at            |
-    | created_at              |
-    +-------------------------+
+    +-----------------------------+     +--------------------------------+
+    |  push_subscriptions         |     |  active_sessions               |
+    +-----------------------------+     +--------------------------------+
+    | id (PK)                     |     | id (PK)                        |
+    | user_id (FK)                |     | note_id (FK)                   |
+    | endpoint                    |     | user_id (FK)                   |
+    | p256dh                      |     | cursor_line                    |
+    | auth                        |     | cursor_column                  |
+    | user_agent (new)            |     | last_seen_at                   |
+    | created_at                  |     | created_at                     |
+    +-----------------------------+     +--------------------------------+
 ```
 
 ### Table Definitions
@@ -569,6 +626,8 @@ preferences JSONB DEFAULT '{}'::jsonb,
 reset_token VARCHAR(64),
 reset_token_expires TIMESTAMPTZ,
 last_login_at TIMESTAMPTZ,
+failed_login_attempts INTEGER DEFAULT 0,     
+locked_until TIMESTAMPTZ,                    
 created_at TIMESTAMPTZ DEFAULT NOW(),
 updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -601,6 +660,10 @@ CREATE INDEX idx_notes_user_archived ON notes(user_id, updated_at DESC) WHERE is
 
 CREATE INDEX idx_notes_content_search ON notes USING GIN (to_tsvector('english', content));
 CREATE INDEX idx_notes_title_search ON notes USING GIN (to_tsvector('english', title));
+
+CREATE INDEX IF NOT EXISTS idx_notes_access_check ON notes(id, user_id, is_deleted);
+CREATE INDEX IF NOT EXISTS idx_notes_full_text_search
+    ON notes USING GIN (to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content, '')));
 ```
 
 #### Revisions Table
@@ -694,14 +757,61 @@ CREATE INDEX idx_active_sessions_user_id ON active_sessions(user_id)
 WHERE last_seen_at > NOW() - INTERVAL '5 minutes';
 ```
 
+#### Note Collaborators (new)
+
+```sql
+CREATE TABLE note_collaborators (
+    note_id UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    permission VARCHAR(20) NOT NULL DEFAULT 'edit' CHECK (permission IN ('edit', 'view')),
+    invited_by UUID NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    PRIMARY KEY (note_id, user_id)
+);
+```
+
+#### Collab Operations (new — CRDT relay buffer)
+
+```sql
+CREATE TABLE collab_operations (
+    id BIGSERIAL PRIMARY KEY,
+    note_id UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    client_id VARCHAR(64) NOT NULL,
+    op_type VARCHAR(20) NOT NULL CHECK (op_type IN ('insert', 'delete')),
+    position INTEGER NOT NULL,
+    text_content TEXT,
+    length INTEGER,
+    applied BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_collab_ops_note ON collab_operations(note_id, id);
+
+-- Auto-cleanup: delete applied ops older than 1 hour
+CREATE OR REPLACE FUNCTION cleanup_collab_operations()
+RETURNS TRIGGER AS $$ BEGIN
+    DELETE FROM collab_operations
+    WHERE applied = TRUE AND created_at < NOW() - INTERVAL '1 hour';
+    RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trigger_cleanup_collab_ops
+    AFTER INSERT ON collab_operations
+    EXECUTE FUNCTION cleanup_collab_operations();
+```
+
 ### Database Optimizations
 
 - Composite indexes for fast user-specific queries
-- GIN indexes for full-text search
+- GIN indexes for full-text search (separate title + content + combined)
+- Composite index for access checks (`notes(id, user_id, is_deleted)`)
+- Composite index for note_tags joins (`note_tags(note_id, tag_id)`)
 - Foreign key constraints for referential integrity
 - Cascade deletes for automatic cleanup of related data
 - Trigger-based updated_at timestamps
+- Trigger-based revision snapshots on note update
 - Soft deletes for note recovery
+- Auto-cleanup of stale collaboration operations
 - Connection pooling for efficient resource usage
 
 ---
@@ -711,60 +821,137 @@ WHERE last_seen_at > NOW() - INTERVAL '5 minutes';
 ### Connection Flow
 
 ```
-Client connects: ws://api/v1/notes/{note_id}/ws
-+-- Authorization: Bearer <token> (OR ?token=<token> for native browser WS)
+Client connects: wss://host/api/v1/notes/{note_id}/ws?token=<access_token>
 
-Server verifies JWT and note access
+Server verifies JWT, checks note access, checks per-user WS limit (max 5)
++-- Rejects with error if limit exceeded
 +-- Creates active_session record
++-- Broadcasts "user:joined" to all other connected clients
 
-Client sends cursor moves or edits
-+-- Broadcast to all connections for this note
-+-- Publish to Redis for other instances
+Client sends cursor moves, edits, or CRDT operations
++-- Relayed to all other connections for this note
++-- CRDT ops stored in collab_operations table
++-- Published to Redis for other instances
+
+Client sends "op:sync_request" with last_known_id
++-- Server responds with "op:sync_batch" of all missed ops
 
 Client receives updates from other users
-+-- Update UI with changes and cursor positions
++-- Updates editor content, cursor positions, presence list
 
-Client disconnects
-+-- Delete active_session record
-+-- Broadcast "user_left" event
+Background task (every 10 seconds)
++-- Replays unapplied CRDT ops against notes.content
++-- Marks ops as applied
+
+Client sends "ping" every 30 seconds
++-- Server responds with "pong"
+
+Client disconnects (navigates away, closes tab, timeout)
++-- Deletes active_session record
++-- Broadcasts "user:left" event
++-- Decrements per-user connection counter
 ```
 
-### Message Types
+### Client → Server Message Types
 
 ```typescript
-// Cursor movement
+// Heartbeat
+{ "type": "ping", "timestamp": "2025-12-13T..." }
+
+// Note content update (broadcast to other clients)
 {
-"type": "cursor:move",
-"note_id": "uuid",
-"user_id": "uuid",
-"user_name": "John Doe",
-"position": { "line": 5, "column": 12 },
-"timestamp": "2025-12-13T..."
+  "type": "note:updated",
+  "note_id": "uuid",
+  "title": "string (optional)",
+  "content_delta": "string (optional)",
+  "timestamp": "2025-12-13T..."
 }
 
-// Note update
+// Cursor position (throttled, broadcast to other clients)
 {
-"type": "note:updated",
-"note_id": "uuid",
-"user_id": "uuid",
-"content_delta": "new text",
-"timestamp": "2025-12-13T..."
+  "type": "cursor:move",
+  "note_id": "uuid",
+  "user_id": "uuid",
+  "user_name": "John Doe",
+  "position": { "line": 5, "column": 12 },
+  "timestamp": "2025-12-13T..."
 }
 
-// User joined
+// CRDT: Insert operation (stored + relayed)
 {
-"type": "user:joined",
-"note_id": "uuid",
-"user_id": "uuid",
-"user_name": "Jane Smith",
-"timestamp": "2025-12-13T..."
+  "type": "op:insert",
+  "note_id": "uuid",
+  "client_id": "browser-session-uuid",
+  "position": 42,
+  "text": "hello",
+  "timestamp": "2025-12-13T..."
 }
 
-// Ping/Pong (keepalive)
+// CRDT: Delete operation (stored + relayed)
 {
-"type": "ping",
-"timestamp": "2025-12-13T..."
+  "type": "op:delete",
+  "note_id": "uuid",
+  "client_id": "browser-session-uuid",
+  "position": 10,
+  "length": 5,
+  "timestamp": "2025-12-13T..."
 }
+
+// CRDT: Sync request (sent on reconnect)
+{
+  "type": "op:sync_request",
+  "note_id": "uuid",
+  "last_known_id": 123,
+  "timestamp": "2025-12-13T..."
+}
+```
+
+### Server → Client Message Types
+
+```typescript
+// Heartbeat response
+{ "type": "pong", "timestamp": "2025-12-13T..." }
+
+// Note update from another user (apply to editor)
+{
+  "type": "note:updated",
+  "note_id": "uuid",
+  "user_id": "uuid",
+  "title": "string (optional)",
+  "content_delta": "string (optional)",
+  "timestamp": "2025-12-13T..."
+}
+
+// Cursor from another user (render colored indicator)
+{
+  "type": "cursor:move",
+  "note_id": "uuid",
+  "user_id": "uuid",
+  "user_name": "Jane Smith",
+  "position": { "line": 5, "column": 12 },
+  "timestamp": "2025-12-13T..."
+}
+
+// Presence
+{ "type": "user:joined",  "note_id": "uuid", "user_id": "uuid", "user_name": "string", "timestamp": "..." }
+{ "type": "user:left",    "note_id": "uuid", "user_id": "uuid", "timestamp": "..." }
+
+// CRDT operations from other users (apply using CRDT logic)
+{ "type": "op:insert",    "note_id": "uuid", "client_id": "string", "position": 42, "text": "hello", "timestamp": "..." }
+{ "type": "op:delete",    "note_id": "uuid", "client_id": "string", "position": 10, "length": 5, "timestamp": "..." }
+
+// CRDT sync batch (response to sync_request)
+{
+  "type": "op:sync_batch",
+  "note_id": "uuid",
+  "ops": [
+    { "id": 456, "op_type": "insert", "position": 42, "text_content": "hello", ... }
+  ],
+  "timestamp": "2025-12-13T..."
+}
+
+// Error
+{ "type": "error", "message": "string", "timestamp": "..." }
 ```
 
 ### Multi-Instance Sync
@@ -774,6 +961,12 @@ Instance 1 --+
              +-> Redis Pub/Sub --> All Instances
 Instance 2 --+
 ```
+
+### WS Rate Limiting
+
+- Maximum 5 concurrent WebSocket connections per user account
+- Connections exceeding the limit are rejected immediately with an error message
+- Counter decremented on clean disconnect or timeout (60s without ping)
 
 ---
 
@@ -840,29 +1033,32 @@ docker run -p 8080:8080 --env-file .env noteflow-backend
 ### Environment Variables (Production)
 
 ```env
+# Database
 DATABASE_URL=<supabase-connection-string>
 REDIS_URL=<upstash-connection-string>
-JWT_SECRET=<secure-random-key>
-JWT_ACCESS_EXPIRATION=3600
-JWT_REFRESH_EXPIRATION=2592000
+
+# Security
+JWT_SECRET=<openssl rand -base64 32>
+ENCRYPTION_KEY=<32-bytes-as-hex>
+
+# Logging
 RUST_LOG=info
-MAX_NOTE_SIZE=102400
-MAX_NOTES_PER_USER=50
-RATE_LIMIT_ANONYMOUS=20
-RATE_LIMIT_AUTHENTICATED=100
 
-# Email (Brevo - 300 emails/day free)
+# Email (Brevo — 300 emails/day free)
 BREVO_API_KEY=<your-brevo-api-key>
-EMAIL_FROM=noreply@noteflow.app
-APP_URL=<frontend-url>
+BREVO_FROM_EMAIL=noreply@noteflow.app
 
-# Avatar Upload (ImgBB)
-IMGBB_API_KEY=<your-imgbb-api-key>
+# Self URL (for health check self-ping + reset links)
+SELF_URL=https://your-app.onrender.com
 
 # Web Push VAPID (auto-generated if empty)
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:notifications@noteflow.app
+
+# ImageKit (free tier avatar CDN)
+IMAGEKIT_PRIVATE_KEY=<your-imagekit-private-key>
+
 ```
 
 ---
@@ -891,57 +1087,63 @@ noteflow-backend/
 |   +-- 20251213000008_create_refresh_tokens.sql
 |   +-- 20251213000009_fix_active_sessions.sql
 |   +-- 20251213000010_create_push_subscriptions.sql
+|   +-- 20251213000011_create_note_collaborators.sql    
+|   +-- 20251213000012_create_collab_operations.sql     
+|   +-- 20251213000013_add_account_lockout.sql          
+|   +-- 20251213000014_add_missing_indexes.sql          
 
 +-- src/
-    +-- main.rs                         # Application entry
+    +-- main.rs                         # Application entry, router, Prometheus setup
     +-- lib.rs                          # Library exports
     +-- config.rs                       # Configuration
 
     +-- models/                         # Data models
     |   +-- mod.rs
-    |   +-- user.rs                     # User model
-    |   +-- note.rs                     # Note model
-    |   +-- revision.rs                 # Revision model
-    |   +-- tag.rs                      # Tag model
+    |   +-- user.rs                     # User + auth request/response types
+    |   +-- note.rs                     # Note + collaborator + filter types
+    |   +-- revision.rs                 # Revision models
+    |   +-- tag.rs                      # Tag models
     |   +-- session.rs                  # Active session model
-    |   +-- collaboration.rs            # WebSocket message types
+    |   +-- collaboration.rs            # WsMessage enum + CRDT types
 
     +-- db/                             # Database layer
     |   +-- mod.rs
     |   +-- postgres.rs                 # PostgreSQL pool
-    |   +-- redis.rs                    # Redis manager
+    |   +-- redis.rs                    # Redis connection manager
 
     +-- services/                       # Business logic
     |   +-- mod.rs
-    |   +-- auth_service.rs             # Authentication
-    |   +-- note_service.rs             # Note operations
-    |   +-- tag_service.rs              # Tag management
-    |   +-- user_service.rs             # User profile management
+    |   +-- auth_service.rs             # Authentication, tokens, lockout
+    |   +-- note_service.rs             # Note CRUD, batch loading, search, cache
+    |   +-- note_collaborator_service.rs # Share/invite/permission management
+    |   +-- tag_service.rs              # Tag CRUD, note assignment
+    |   +-- user_service.rs             # Profile, avatar, preferences
     |   +-- revision_service.rs         # Version history
-    |   +-- notification_service.rs     # Push + email notifications
-    |   +-- collaboration_service.rs    # Real-time collaboration
+    |   +-- notification_service.rs     # Web Push + Brevo email
+    |   +-- collaboration_service.rs    # WS lifecycle, CRDT relay, background tasks
 
-    +-- handlers/                       # HTTP handlers
+    +-- handlers/                       # HTTP + WebSocket handlers
     |   +-- mod.rs
     |   +-- auth.rs                     # Auth endpoints
-    |   +-- notes.rs                    # Note endpoints
-    |   +-- tags.rs                     # Tag management endpoints
-    |   +-- users.rs                    # User profile endpoints
-    |   +-- notifications.rs            # Push notification endpoints
-    |   +-- revisions.rs                # Version history endpoints
-    |   +-- search.rs                   # Search endpoint
-    |   +-- websocket.rs                # WebSocket handler
+    |   +-- notes.rs                    # Note CRUD, favorite, archive, export, search
+    |   +-- tags.rs                     # Tag management
+    |   +-- collaborators.rs            # Share/invite management
+    |   +-- users.rs                    # Profile, preferences, avatar
+    |   +-- notifications.rs            # Push subscribe/unsubscribe
+    |   +-- revisions.rs                # Version history
+    |   +-- websocket.rs                # WebSocket upgrade handler
 
-    +-- middleware/                     # Middleware
+    +-- middleware/                     # Tower middleware
     |   +-- mod.rs
     |   +-- auth.rs                     # JWT verification
-    |   +-- rate_limit.rs               # Rate limiting
+    |   +-- rate_limit.rs               # IP + per-email rate limiting
+    |   +-- request_id.rs               # UUID per request + X-Request-Id
 
     +-- utils/                          # Utilities
         +-- mod.rs
-        +-- errors.rs                   # Error handling
+        +-- errors.rs                   # AppError + Result types
         +-- jwt.rs                      # JWT manager
-        +-- validation.rs               # Input validation
+        +-- validation.rs               # Input sanitization + validation
         +-- web_push.rs                 # Pure Rust Web Push encryption
 ```
 
@@ -950,28 +1152,51 @@ noteflow-backend/
 ## Security
 
 ### Authentication
-- JWT tokens with HS256 algorithm
+- JWT tokens with HS256 algorithm (HMAC-SHA256)
 - Short-lived access tokens (1h) and long-lived refresh tokens (30d)
-- Session listing and revocation capabilities
+- Token rotation — every refresh invalidates the old token and issues a new one
+- Session listing and revocation from any device
 - Stateless design with no server-side session storage
 
+### Account Lockout
+- 10 consecutive failed login attempts → account locked for 15 minutes
+- `failed_login_attempts` counter resets on successful login
+- Locked accounts return 429 regardless of password correctness
+- Defends against credential stuffing and brute-force attacks
+
 ### Password Security
-- Bcrypt hashing with configurable cost factor (default 10)
+- Bcrypt hashing with cost factor 12
 - Unique salt generation per password
 - Passwords never stored or logged in plain text
 - Timing-safe comparison to prevent timing attacks
 
 ### Input Validation
-- RFC 5322 compliant email validation
-- Minimum 8-character password requirement
+- RFC 5322 compliant email validation via `validator` crate
+- Minimum 8-character password requirement (max 128)
 - Content sanitization and size limits on all inputs
 - Parameterized queries prevent SQL injection
+- Request body size limit: 5MB (configurable via `RequestBodyLimitLayer`)
 
 ### Rate Limiting
 - IP-based sliding window algorithm
-- Anonymous: 20 requests/minute
-- Authenticated: 100 requests/minute
+- Per-email brute-force protection on login/register (5 requests per 60 seconds)
+- Global limits enforced via `X-RateLimit-Limit` / `X-RateLimit-Remaining` response headers
+- WebSocket connection limit: max 5 concurrent connections per user
 - Background cleanup prevents memory leaks
+
+### Layered Middleware Stack
+```
+Incoming Request
+  → Extension(PrometheusHandle) (metrics)
+  → CorsLayer                    (CORS)
+  → RequestBodyLimitLayer        (5MB cap)
+  → CompressionLayer             (gzip)
+  → RequestId middleware         (UUID + X-Request-Id header)
+  → TraceLayer                   (structured span logging)
+  → Rate Limit middleware        (IP + per-email limits)
+  → Auth middleware               (JWT verification)
+    → Handler
+```
 
 ### Push Notification Security
 - VAPID authentication with signed JWT per push request
@@ -979,12 +1204,16 @@ noteflow-backend/
 - Pure Rust cryptography implementation (no system OpenSSL)
 - No shared push secrets across endpoints
 
+### Error Handling
+- All errors follow a consistent `{ "error": "...", "status": N }` shape
+- Internal errors logged server-side but return generic messages to clients
+- Stack traces never exposed in production responses
+- Graceful shutdown handler (SIGTERM/SIGINT) drains in-flight requests
+
 ### Additional Measures
 - Configurable CORS origin policies
 - HTTPS enforcement in production
-- Error responses sanitized of sensitive data
-- Graceful shutdown handler (SIGTERM/SIGINT)
-- Structured logging with no secrets in output
+- Structured JSON logging with no secrets in output
 
 ---
 

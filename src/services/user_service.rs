@@ -1,4 +1,5 @@
-// src/services/user_service.rs
+use uuid::Uuid;
+
 use crate::models::user::*;
 use crate::utils::{
     errors::{AppError, Result},
@@ -6,7 +7,6 @@ use crate::utils::{
 };
 use crate::Config;
 use sqlx::PgPool;
-use uuid::Uuid;
 
 pub struct UserService {
     pool: PgPool,
@@ -18,7 +18,6 @@ impl UserService {
         Self { pool, config }
     }
 
-    /// Get user profile with all details
     pub async fn get_profile(&self, user_id: Uuid) -> Result<UserProfile> {
         let user = sqlx::query!(
             r#"
@@ -46,13 +45,11 @@ impl UserService {
         })
     }
 
-    /// Update user profile
     pub async fn update_profile(
         &self,
         user_id: Uuid,
         req: UpdateProfileRequest,
     ) -> Result<UserProfile> {
-        // Validate display name if provided
         if let Some(ref name) = req.display_name {
             let sanitized = validation::sanitize_string(name);
             if sanitized.is_empty() || sanitized.len() > 100 {
@@ -62,16 +59,6 @@ impl UserService {
             }
         }
 
-        // Validate avatar URL if provided
-        if let Some(ref url) = req.avatar_url {
-            if !url.is_empty() && !url.starts_with("http://") && !url.starts_with("https://") {
-                return Err(AppError::ValidationError(
-                    "Avatar URL must be a valid HTTP(S) URL".into(),
-                ));
-            }
-        }
-
-        // Build dynamic update query
         let mut query = String::from("UPDATE users SET updated_at = NOW()");
         let mut param_count = 1;
 
@@ -102,7 +89,6 @@ impl UserService {
         self.get_profile(user_id).await
     }
 
-    /// Update user preferences (theme + custom preferences JSON)
     pub async fn update_preferences(
         &self,
         user_id: Uuid,
@@ -116,7 +102,6 @@ impl UserService {
             }
         });
 
-        // Validate theme if provided
         if let Some(ref t) = theme {
             if !["light", "dark", "auto"].contains(&t.as_str()) {
                 return Err(AppError::ValidationError(
@@ -125,7 +110,6 @@ impl UserService {
             }
         }
 
-        // Validate preferences is an object if provided
         if let Some(ref prefs) = req.preferences {
             if !prefs.is_object() {
                 return Err(AppError::ValidationError(
@@ -165,60 +149,70 @@ impl UserService {
         self.get_profile(user_id).await
     }
 
-    /// Upload avatar image to ImgBB and return the public URL
-    pub async fn upload_avatar(&self, image_data: &str, user_id: &Uuid) -> Result<String> {
-        if self.config.imgbb_api_key.is_empty() {
+    pub async fn upload_avatar(&self, image_bytes: &[u8], content_type: &str, user_id: &Uuid) -> Result<String> {
+        if self.config.imagekit_private_key.is_empty() {
             return Err(AppError::InternalError(
-                "Avatar upload not configured (IMGBB_API_KEY missing)".into(),
+                "Avatar upload not configured (IMAGEKIT_PRIVATE_KEY missing)".into(),
             ));
         }
 
-        // Extract base64 data (strip data:image/...;base64, prefix if present)
-        let base64 = if let Some(comma_pos) = image_data.find(',') {
-            &image_data[comma_pos + 1..]
-        } else {
-            image_data
+        if image_bytes.len() > 5_000_000 {
+            return Err(AppError::ValidationError("Image too large (max 5MB)".into()));
+        }
+
+        let ext = match content_type {
+            c if c.contains("png") => "png",
+            c if c.contains("gif") => "gif",
+            c if c.contains("webp") => "webp",
+            _ => "jpg",
         };
 
-        // Validate base64
-        if base64.len() > 5_000_000 {
-            return Err(AppError::ValidationError(
-                "Image too large (max 5MB)".into(),
-            ));
-        }
+        use base64::Engine;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let encoded = b64.encode(image_bytes);
 
         let client = reqwest::Client::new();
-        let params = [("key", self.config.imgbb_api_key.as_str()), ("image", base64)];
+        let form = reqwest::multipart::Form::new()
+            .text("file", encoded)
+            .text("fileName", format!("avatar-{}.{}", user_id, ext))
+            .text("useUniqueFileName", "true")
+            .text("folder", "avatars");
 
         let response = client
-            .post("https://api.imgbb.com/1/upload")
-            .form(&params)
+            .post("https://upload.imagekit.io/api/v1/files/upload")
+            .basic_auth(&self.config.imagekit_private_key, None::<&str>)
+            .multipart(form)
             .send()
             .await
-            .map_err(|e| {
-                AppError::InternalError(format!("Failed to upload avatar: {}", e))
-            })?;
+            .map_err(|e| AppError::InternalError(format!("Failed to upload avatar: {}", e)))?;
 
         if !response.status().is_success() {
             let text = response.text().await.unwrap_or_default();
-            tracing::error!("ImgBB upload failed: {}", text);
+            tracing::error!("ImageKit upload failed: {}", text);
             return Err(AppError::InternalError("Avatar upload failed".into()));
         }
 
         let json: serde_json::Value = response.json().await.map_err(|e| {
-            AppError::InternalError(format!("Failed to parse ImgBB response: {}", e))
+            AppError::InternalError(format!("Failed to parse ImageKit response: {}", e))
         })?;
 
-        let url = json["data"]["url"]
+        let url = json["url"]
             .as_str()
-            .ok_or_else(|| AppError::InternalError("Failed to get image URL from ImgBB".into()))?
+            .ok_or_else(|| AppError::InternalError("Failed to get URL from ImageKit response".into()))?
             .to_string();
 
-        tracing::info!("Avatar uploaded to ImgBB for user {}: {}", user_id, url);
+        sqlx::query!(
+            "UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2",
+            url,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await?;
+
+        tracing::info!("Avatar uploaded to ImageKit for user {}: {}", user_id, url);
         Ok(url)
     }
 
-    /// Update last login timestamp
     pub async fn update_last_login(&self, user_id: Uuid) -> Result<()> {
         sqlx::query!(
             "UPDATE users SET last_login_at = NOW() WHERE id = $1",

@@ -1,26 +1,29 @@
-// src/services/note_service.rs
 use crate::config::Config;
 use crate::models::note::*;
+use crate::services::{NoteCollaboratorService, NotificationService};
 use crate::utils::{
     errors::{AppError, Result},
     validation,
 };
 use sqlx::PgPool;
 use sqlx::Row;
+use std::collections::HashMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub struct NoteService {
     pool: PgPool,
     config: Config,
+    collab_service: Arc<NoteCollaboratorService>,
+    notification_service: Arc<NotificationService>,
 }
 
 impl NoteService {
-    pub fn new(pool: PgPool, config: Config) -> Self {
-        Self { pool, config }
+    pub fn new(pool: PgPool, config: Config, collab_service: Arc<NoteCollaboratorService>, notification_service: Arc<NotificationService>) -> Self {
+        Self { pool, config, collab_service, notification_service }
     }
 
     pub async fn create(&self, user_id: Uuid, req: CreateNoteRequest) -> Result<NoteResponse> {
-        // Check note limit
         let count = sqlx::query!(
             "SELECT COUNT(*) as count FROM notes WHERE user_id = $1 AND is_deleted = false",
             user_id
@@ -52,6 +55,7 @@ impl NoteService {
 
         Ok(NoteResponse {
             id: note.id,
+            user_id: note.user_id,
             title: note.title,
             content: note.content,
             last_edited_by: note.last_edited_by,
@@ -61,10 +65,14 @@ impl NoteService {
             updated_at: note.updated_at,
             tags: vec![],
             active_users: vec![],
+            collaborators: vec![],
+            permission: "owner".into(),
         })
     }
 
     pub async fn get(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
+        let permission = self.collab_service.verify_note_access(note_id, user_id).await?;
+
         let note = sqlx::query!(
             r#"SELECT id, user_id, title, content, last_edited_by, 
                       is_favorited, is_archived, is_deleted, created_at, updated_at 
@@ -76,13 +84,6 @@ impl NoteService {
         .await?
         .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
 
-        if note.user_id != user_id {
-            return Err(AppError::Forbidden(
-                "Not authorized to access this note".to_string(),
-            ));
-        }
-
-        // Fetch tags
         let tags = sqlx::query!(
             r#"SELECT t.name FROM tags t
                INNER JOIN note_tags nt ON t.id = nt.tag_id
@@ -95,11 +96,12 @@ impl NoteService {
         .map(|r| r.name)
         .collect();
 
-        // Fetch active users
         let active_users = self.get_active_users(note_id).await?;
+        let collaborators = self.collab_service.get_note_collaborators(note_id).await?;
 
         Ok(NoteResponse {
             id: note.id,
+            user_id: note.user_id,
             title: note.title,
             content: note.content,
             last_edited_by: note.last_edited_by,
@@ -109,6 +111,8 @@ impl NoteService {
             updated_at: note.updated_at,
             tags,
             active_users,
+            collaborators,
+            permission,
         })
     }
 
@@ -117,54 +121,76 @@ impl NoteService {
         let limit = params.limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
 
-        let notes = sqlx::query!(
-            r#"SELECT id, user_id, title, content, last_edited_by, 
-                      is_favorited, is_archived, is_deleted, created_at, updated_at 
-               FROM notes 
-               WHERE user_id = $1 AND is_deleted = false
-               ORDER BY updated_at DESC
+        let rows = sqlx::query(
+            r#"SELECT n.id, n.user_id, n.title, n.content, n.last_edited_by, 
+                      n.is_favorited, n.is_archived, n.created_at, n.updated_at,
+                      nc.permission
+               FROM notes n
+               LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
+               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false
+               ORDER BY n.updated_at DESC
                LIMIT $2 OFFSET $3"#,
-            user_id,
-            limit as i64,
-            offset as i64
         )
+        .bind(user_id)
+        .bind(limit as i64)
+        .bind(offset as i64)
         .fetch_all(&self.pool)
         .await?;
 
-        let total = sqlx::query!(
-            "SELECT COUNT(*) as count FROM notes WHERE user_id = $1 AND is_deleted = false",
-            user_id
+        let total: Option<i64> = sqlx::query_scalar(
+            r#"SELECT COUNT(*) FROM notes n
+               LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
+               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false"#,
         )
+        .bind(user_id)
         .fetch_one(&self.pool)
-        .await?
-        .count
-        .unwrap_or(0);
+        .await?;
 
-        let mut responses = vec![];
-        for note in notes {
-            let tags = self.get_note_tags(note.id).await?;
-            let active_users = self.get_active_users(note.id).await?;
+        let total = total.unwrap_or(0);
+        self.build_note_responses(rows, user_id).await
+            .map(|notes| NoteListResponse { notes, total, page, limit })
+    }
 
-            responses.push(NoteResponse {
-                id: note.id,
-                title: note.title,
-                content: note.content,
-                last_edited_by: note.last_edited_by,
-                is_favorited: note.is_favorited,
-                is_archived: note.is_archived,
-                created_at: note.created_at,
-                updated_at: note.updated_at,
-                tags,
-                active_users,
-            });
+    async fn build_note_responses(&self, rows: Vec<sqlx::postgres::PgRow>, user_id: Uuid) -> Result<Vec<NoteResponse>> {
+        if rows.is_empty() {
+            return Ok(vec![]);
         }
 
-        Ok(NoteListResponse {
-            notes: responses,
-            total,
-            page,
-            limit,
-        })
+        let note_ids: Vec<Uuid> = rows.iter().map(|r| r.try_get::<Uuid, _>("id").unwrap()).collect();
+
+        let tags_map = self.batch_get_tags_map(&note_ids).await?;
+        let active_users_map = self.batch_get_active_users_map(&note_ids).await?;
+        let collab_map = self.collab_service.batch_get_note_collaborators(&note_ids).await?;
+
+        let mut responses = Vec::with_capacity(rows.len());
+        for row in rows {
+            let note_id: Uuid = row.try_get("id")?;
+            let note_user_id: Uuid = row.try_get("user_id")?;
+
+            let collab_perm: Option<String> = row.try_get("permission").unwrap_or(None);
+            let permission = if note_user_id == user_id {
+                "owner".to_string()
+            } else {
+                collab_perm.unwrap_or_else(|| "read".into())
+            };
+
+            responses.push(NoteResponse {
+                id: note_id,
+                user_id: note_user_id,
+                title: row.try_get("title")?,
+                content: row.try_get("content")?,
+                last_edited_by: row.try_get("last_edited_by")?,
+                is_favorited: row.try_get("is_favorited")?,
+                is_archived: row.try_get("is_archived")?,
+                created_at: row.try_get("created_at")?,
+                updated_at: row.try_get("updated_at")?,
+                tags: tags_map.get(&note_id).cloned().unwrap_or_default(),
+                active_users: active_users_map.get(&note_id).cloned().unwrap_or_default(),
+                collaborators: collab_map.get(&note_id).cloned().unwrap_or_default(),
+                permission,
+            });
+        }
+        Ok(responses)
     }
 
     pub async fn update(
@@ -173,6 +199,11 @@ impl NoteService {
         user_id: Uuid,
         req: UpdateNoteRequest,
     ) -> Result<NoteResponse> {
+        let permission = self.collab_service.verify_note_access(note_id, user_id).await?;
+        if permission != "owner" && permission != "write" && permission != "admin" {
+            return Err(AppError::Forbidden("Not authorized to edit this note".to_string()));
+        }
+
         let note = sqlx::query!(
             r#"SELECT id, user_id, title, content, last_edited_by, 
                       is_favorited, is_archived, is_deleted, created_at, updated_at
@@ -183,10 +214,6 @@ impl NoteService {
         .fetch_optional(&self.pool)
         .await?
         .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
-
-        if note.user_id != user_id {
-            return Err(AppError::Forbidden("Not authorized".to_string()));
-        }
 
         let title = req.title.unwrap_or(note.title);
         let content = req.content.unwrap_or(note.content);
@@ -206,6 +233,21 @@ impl NoteService {
         .execute(&self.pool)
         .await?;
 
+        let updater_name: Option<String> = sqlx::query_scalar(
+            "SELECT display_name FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or(None);
+
+        if let Some(ref name) = updater_name {
+            self.notification_service
+                .notify_note_updated(note_id, &title, name, note.user_id)
+                .await
+                .ok();
+        }
+
         self.get(note_id, user_id).await
     }
 
@@ -216,7 +258,7 @@ impl NoteService {
             .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
 
         if note.user_id != user_id {
-            return Err(AppError::Forbidden("Not authorized".to_string()));
+            return Err(AppError::Forbidden("Only the owner can delete a note".to_string()));
         }
 
         sqlx::query!("UPDATE notes SET is_deleted = true WHERE id = $1", note_id)
@@ -226,9 +268,7 @@ impl NoteService {
         Ok(())
     }
 
-    /// Toggle favorite status
     pub async fn toggle_favorite(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
-        // Verify ownership
         self.verify_note_ownership(note_id, user_id).await?;
 
         sqlx::query!(
@@ -241,7 +281,6 @@ impl NoteService {
         self.get(note_id, user_id).await
     }
 
-    /// Toggle archive status
     pub async fn toggle_archive(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
         self.verify_note_ownership(note_id, user_id).await?;
 
@@ -255,7 +294,6 @@ impl NoteService {
         self.get(note_id, user_id).await
     }
 
-    /// List notes with advanced filtering
     pub async fn list_filtered(
         &self,
         user_id: Uuid,
@@ -268,7 +306,6 @@ impl NoteService {
         let sort_by = params.sort_by.as_deref().unwrap_or("updated_at");
         let sort_order = params.sort_order.as_deref().unwrap_or("DESC");
 
-        // Validate sort fields
         let valid_sort_fields = ["created_at", "updated_at", "title"];
         if !valid_sort_fields.contains(&sort_by) {
             return Err(AppError::ValidationError("Invalid sort field".into()));
@@ -280,11 +317,10 @@ impl NoteService {
             ));
         }
 
-        // Build WHERE clause based on filter
         let (filter_clause, _is_archived_filter) = match params.filter.as_deref() {
             Some("favorites") => ("AND n.is_favorited = true AND n.is_archived = false", false),
             Some("archived") => ("AND n.is_archived = true", true),
-            _ => ("AND n.is_archived = false", false), // "all" or no filter
+            _ => ("AND n.is_archived = false", false),
         };
 
         let (tag_join, tag_filter) = if params.tag_id.is_some() {
@@ -296,12 +332,14 @@ impl NoteService {
         let query_str = format!(
             r#"
             SELECT
-                n.id, n.title, n.content, n.last_edited_by,
+                n.id, n.user_id, n.title, n.content, n.last_edited_by,
                 n.is_favorited, n.is_archived,
-                n.created_at, n.updated_at
+                n.created_at, n.updated_at,
+                nc.permission
             FROM notes n
             {}
-            WHERE n.user_id = $1 AND n.is_deleted = false {} {}
+            LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
+            WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {} {}
             ORDER BY n.{} {}
             LIMIT $2 OFFSET $3
             "#,
@@ -320,7 +358,7 @@ impl NoteService {
         let notes = query.fetch_all(&self.pool).await?;
 
         let count_query = format!(
-            "SELECT COUNT(*) as count FROM notes n {} WHERE n.user_id = $1 AND n.is_deleted = false {} {}",
+            r#"SELECT COUNT(*) as count FROM notes n {} LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1 WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {} {}"#,
             tag_join, filter_clause, tag_filter
         );
 
@@ -333,35 +371,10 @@ impl NoteService {
 
         let total: i64 = count_bind.fetch_one(&self.pool).await?;
 
-        let mut responses = Vec::new();
-        for row in notes {
-            let note_id: Uuid = row.try_get("id")?;
-            let tags = self.get_note_tags(note_id).await?;
-            let active_users = self.get_active_users(note_id).await?;
-
-            responses.push(NoteResponse {
-                id: note_id,
-                title: row.try_get("title")?,
-                content: row.try_get("content")?,
-                last_edited_by: row.try_get("last_edited_by")?,
-                is_favorited: row.try_get("is_favorited")?,
-                is_archived: row.try_get("is_archived")?,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-                tags,
-                active_users,
-            });
-        }
-
-        Ok(NoteListResponse {
-            notes: responses,
-            total,
-            page,
-            limit,
-        })
+        self.build_note_responses(notes, user_id).await
+            .map(|notes| NoteListResponse { notes, total, page, limit })
     }
 
-    /// Search notes with full-text search
     pub async fn search(&self, user_id: Uuid, params: SearchParams) -> Result<SearchResponse> {
         let query = validation::sanitize_string(&params.q).trim().to_string();
 
@@ -374,67 +387,121 @@ impl NoteService {
         }
 
         let limit = params.limit.unwrap_or(50).min(100) as i64;
+        let like_pattern = format!("%{}%", query);
 
-        let notes = sqlx::query!(
+        let notes = sqlx::query(
             r#"
             SELECT
-                id, title, content, last_edited_by,
-                is_favorited, is_archived, created_at, updated_at
-            FROM notes
-            WHERE user_id = $1
-                AND is_deleted = false
+                n.id, n.user_id, n.title, n.content, n.last_edited_by,
+                n.is_favorited, n.is_archived, n.created_at, n.updated_at,
+                nc.permission
+            FROM notes n
+            LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
+            WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL)
+                AND n.is_deleted = false
                 AND (
-                    to_tsvector('english', title || ' ' || content) @@ plainto_tsquery('english', $2)
-                    OR title ILIKE $3
-                    OR content ILIKE $3
+                    to_tsvector('english', n.title || ' ' || n.content) @@ plainto_tsquery('english', $2)
+                    OR n.title ILIKE $3
+                    OR n.content ILIKE $3
                 )
             ORDER BY
                 CASE
-                    WHEN title ILIKE $3 THEN 1
-                    WHEN content ILIKE $3 THEN 2
+                    WHEN n.title ILIKE $3 THEN 1
+                    WHEN n.content ILIKE $3 THEN 2
                     ELSE 3
                 END,
-                ts_rank(to_tsvector('english', title || ' ' || content), plainto_tsquery('english', $2)) DESC,
-                updated_at DESC
+                ts_rank(to_tsvector('english', n.title || ' ' || n.content), plainto_tsquery('english', $2)) DESC,
+                n.updated_at DESC
             LIMIT $4
             "#,
-            user_id,
-            query,
-            format!("%{}%", query),
-            limit
         )
+        .bind(user_id)
+        .bind(&query)
+        .bind(&like_pattern)
+        .bind(limit)
         .fetch_all(&self.pool)
         .await?;
 
-        let mut responses = Vec::new();
-        for note in notes {
-            let tags = self.get_note_tags(note.id).await?;
-            let active_users = self.get_active_users(note.id).await?;
+        let total: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM notes n
+            LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
+            WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL)
+                AND n.is_deleted = false
+                AND (
+                    to_tsvector('english', n.title || ' ' || n.content) @@ plainto_tsquery('english', $2)
+                    OR n.title ILIKE $3
+                    OR n.content ILIKE $3
+                )
+            "#,
+        )
+        .bind(user_id)
+        .bind(&query)
+        .bind(&like_pattern)
+        .fetch_one(&self.pool)
+        .await?;
 
-            responses.push(NoteResponse {
-                id: note.id,
-                title: note.title,
-                content: note.content,
-                last_edited_by: note.last_edited_by,
-                is_favorited: note.is_favorited,
-                is_archived: note.is_archived,
-                created_at: note.created_at,
-                updated_at: note.updated_at,
-                tags,
-                active_users,
-            });
-        }
-
-        let total = responses.len() as i64;
-
-        Ok(SearchResponse {
-            notes: responses,
-            total,
-            query,
-        })
+        self.build_note_responses(notes, user_id).await
+            .map(|notes| SearchResponse { notes, total, query })
     }
 
-    // Helper methods
+    async fn batch_get_tags_map(&self, note_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<String>>> {
+        if note_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows = sqlx::query(
+            r#"
+            SELECT nt.note_id, t.name
+            FROM note_tags nt
+            INNER JOIN tags t ON t.id = nt.tag_id
+            WHERE nt.note_id = ANY($1)
+            ORDER BY t.name
+            "#,
+        )
+        .bind(note_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map: HashMap<Uuid, Vec<String>> = HashMap::new();
+        for row in rows {
+            let nid: Uuid = row.try_get("note_id")?;
+            let name: String = row.try_get("name")?;
+            map.entry(nid).or_default().push(name);
+        }
+        Ok(map)
+    }
+
+    async fn batch_get_active_users_map(&self, note_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<ActiveUserInfo>>> {
+        if note_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows = sqlx::query(
+            r#"
+            SELECT s.note_id, s.user_id, u.display_name, s.cursor_line, s.cursor_column
+            FROM active_sessions s
+            INNER JOIN users u ON u.id = s.user_id
+            WHERE s.note_id = ANY($1)
+                AND s.last_seen_at > NOW() - INTERVAL '2 minutes'
+            ORDER BY s.last_seen_at DESC
+            "#,
+        )
+        .bind(note_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map: HashMap<Uuid, Vec<ActiveUserInfo>> = HashMap::new();
+        for row in rows {
+            let nid: Uuid = row.try_get("note_id")?;
+            let entry = map.entry(nid).or_default();
+            entry.push(ActiveUserInfo {
+                user_id: row.try_get("user_id")?,
+                display_name: row.try_get("display_name")?,
+                cursor_line: row.try_get("cursor_line").unwrap_or(0),
+                cursor_column: row.try_get("cursor_column").unwrap_or(0),
+            });
+        }
+        Ok(map)
+    }
 
     async fn verify_note_ownership(&self, note_id: Uuid, user_id: Uuid) -> Result<()> {
         let exists = sqlx::query_scalar!(
@@ -450,23 +517,6 @@ impl NoteService {
             return Err(AppError::NotFound("Note not found or access denied".into()));
         }
         Ok(())
-    }
-
-    async fn get_note_tags(&self, note_id: Uuid) -> Result<Vec<String>> {
-        let tags = sqlx::query_scalar!(
-            r#"
-            SELECT t.name
-            FROM tags t
-            INNER JOIN note_tags nt ON t.id = nt.tag_id
-            WHERE nt.note_id = $1
-            ORDER BY t.name
-            "#,
-            note_id
-        )
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(tags)
     }
 
     async fn get_active_users(&self, note_id: Uuid) -> Result<Vec<ActiveUserInfo>> {

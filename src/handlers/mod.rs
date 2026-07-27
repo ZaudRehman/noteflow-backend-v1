@@ -1,5 +1,6 @@
 // src/handlers/mod.rs
 pub mod auth;
+pub mod collaborators;
 pub mod notes;
 pub mod notifications;
 pub mod revisions;

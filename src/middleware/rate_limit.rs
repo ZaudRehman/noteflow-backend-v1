@@ -1,5 +1,6 @@
 use axum::{
     extract::{ConnectInfo, Request, State},
+    http::HeaderValue,
     middleware::Next,
     response::Response,
 };
@@ -32,17 +33,22 @@ impl RateLimiter {
         }
     }
 
-    pub async fn check_rate_limit(&self, key: &str) -> bool {
+    pub fn limit(&self) -> u32 {
+        self.limit
+    }
+
+    /// Check rate limit and return (allowed, remaining_after_this_request).
+    pub async fn check_rate_limit(&self, key: &str) -> (bool, u32) {
         if let Some(ref redis) = self.redis {
             match redis
                 .check_rate_limit(key, self.limit, self.window_secs)
                 .await
             {
-                Ok((allowed, _)) => {
+                Ok((allowed, remaining)) => {
                     if !allowed {
                         tracing::warn!("Rate limit exceeded (redis) for key: {}", key);
                     }
-                    return allowed;
+                    return (allowed, remaining);
                 }
                 Err(e) => {
                     tracing::warn!("Redis rate limit failed, falling back to in-memory: {}", e);
@@ -52,7 +58,7 @@ impl RateLimiter {
         self.check_rate_limit_in_memory(key).await
     }
 
-    async fn check_rate_limit_in_memory(&self, key: &str) -> bool {
+    async fn check_rate_limit_in_memory(&self, key: &str) -> (bool, u32) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -62,43 +68,14 @@ impl RateLimiter {
         let timestamps = requests.entry(key.to_string()).or_insert_with(Vec::new);
         timestamps.retain(|&t| now - t < self.window_secs);
 
-        if timestamps.len() >= self.limit as usize {
+        let count = timestamps.len() as u32;
+        if count >= self.limit {
             tracing::warn!("Rate limit exceeded (memory) for key: {}", key);
-            return false;
+            return (false, 0);
         }
 
         timestamps.push(now);
-        true
-    }
-
-    pub async fn get_remaining(&self, key: &str) -> u32 {
-        if let Some(ref redis) = self.redis {
-            if let Ok((_, remaining)) = redis
-                .check_rate_limit(key, self.limit, self.window_secs)
-                .await
-            {
-                return remaining;
-            }
-        }
-        self.get_remaining_in_memory(key).await
-    }
-
-    async fn get_remaining_in_memory(&self, key: &str) -> u32 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        let requests = self.requests.read().await;
-        if let Some(timestamps) = requests.get(key) {
-            let valid_count = timestamps
-                .iter()
-                .filter(|&&t| now - t < self.window_secs)
-                .count();
-            self.limit.saturating_sub(valid_count as u32)
-        } else {
-            self.limit
-        }
+        (true, self.limit - count - 1)
     }
 
     /// Only needed for in-memory entries; Redis handles its own expiry
@@ -128,15 +105,25 @@ pub async fn rate_limit_middleware(
     next: Next,
 ) -> Result<Response, AppError> {
     let ip = addr.ip().to_string();
+    let (allowed, remaining) = rate_limiter.check_rate_limit(&ip).await;
 
-    if !rate_limiter.check_rate_limit(&ip).await {
+    if !allowed {
         return Err(AppError::RateLimitExceeded);
     }
 
-    let remaining = rate_limiter.get_remaining(&ip).await;
     tracing::debug!("Request from {} - Remaining: {}", ip, remaining);
 
-    Ok(next.run(req).await)
+    let mut response = next.run(req).await;
+    let limit_str = HeaderValue::from(rate_limiter.limit());
+    let remaining_str = HeaderValue::from(remaining);
+    response
+        .headers_mut()
+        .insert("X-RateLimit-Limit", limit_str);
+    response
+        .headers_mut()
+        .insert("X-RateLimit-Remaining", remaining_str);
+
+    Ok(response)
 }
 
 pub fn start_rate_limit_cleanup(rate_limiter: Arc<RateLimiter>) {

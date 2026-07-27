@@ -2,6 +2,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, FromRow)]
@@ -13,7 +14,7 @@ pub struct Revision {
     pub created_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RevisionResponse {
     pub id: Uuid,
     pub note_id: Uuid,
@@ -34,7 +35,7 @@ impl From<Revision> for RevisionResponse {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct RevisionListResponse {
     pub revisions: Vec<RevisionResponse>,
     pub total: i64,

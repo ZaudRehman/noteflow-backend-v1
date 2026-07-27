@@ -11,6 +11,15 @@ use crate::services::UserService;
 use crate::utils::errors::{AppError, Result};
 
 /// GET /api/v1/users/profile
+#[utoipa::path(
+    get,
+    path = "/api/v1/users/profile",
+    tag = "Users",
+    responses(
+        (status = 200, description = "User profile", body = UserProfile),
+        (status = 401, description = "Unauthorized"),
+    ),
+)]
 pub async fn get_profile(
     State(user_service): State<Arc<UserService>>,
     Extension(user): Extension<User>,
@@ -20,6 +29,15 @@ pub async fn get_profile(
 }
 
 /// PUT /api/v1/users/profile
+#[utoipa::path(
+    put,
+    path = "/api/v1/users/profile",
+    tag = "Users",
+    request_body = UpdateProfileRequest,
+    responses(
+        (status = 200, description = "Profile updated", body = UserProfile),
+    ),
+)]
 pub async fn update_profile(
     State(user_service): State<Arc<UserService>>,
     Extension(user): Extension<User>,
@@ -31,6 +49,15 @@ pub async fn update_profile(
 }
 
 /// PUT /api/v1/users/preferences
+#[utoipa::path(
+    put,
+    path = "/api/v1/users/preferences",
+    tag = "Users",
+    request_body = UpdatePreferencesRequest,
+    responses(
+        (status = 200, description = "Preferences updated", body = UserProfile),
+    ),
+)]
 pub async fn update_preferences(
     State(user_service): State<Arc<UserService>>,
     Extension(user): Extension<User>,
@@ -42,21 +69,30 @@ pub async fn update_preferences(
 
 /// POST /api/v1/users/avatar - Upload avatar image
 /// Accepts multipart/form-data with field "image" (file) or JSON with "image" (base64)
+#[utoipa::path(
+    post,
+    path = "/api/v1/users/avatar",
+    tag = "Users",
+    responses(
+        (status = 200, description = "Avatar uploaded", body = UserProfile),
+        (status = 400, description = "Validation error"),
+    ),
+)]
 pub async fn upload_avatar(
     State(user_service): State<Arc<UserService>>,
     Extension(user): Extension<User>,
     mut multipart: Multipart,
 ) -> Result<(StatusCode, Json<UserProfile>)> {
-    let mut image_data: Option<String> = None;
+    let mut image_bytes: Option<Vec<u8>> = None;
+    let mut content_type: Option<String> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         AppError::InternalError(format!("Failed to read multipart field: {}", e))
     })? {
         if field.name() == Some("image") {
-            let content_type = field
+            content_type = field
                 .content_type()
-                .map(|m| m.to_string())
-                .unwrap_or_default();
+                .map(|m| m.to_string());
 
             let bytes = field.bytes().await.map_err(|e| {
                 AppError::InternalError(format!("Failed to read image data: {}", e))
@@ -70,42 +106,29 @@ pub async fn upload_avatar(
                 return Err(AppError::ValidationError("Image too large (max 5MB)".into()));
             }
 
-            // Determine MIME prefix
-            let mime_prefix = if content_type.contains("png") {
-                "data:image/png;base64,"
-            } else if content_type.contains("gif") {
-                "data:image/gif;base64,"
-            } else if content_type.contains("webp") {
-                "data:image/webp;base64,"
-            } else {
-                "data:image/jpeg;base64,"
-            };
-
-            let b64 = base64::engine::general_purpose::STANDARD;
-            let encoded = base64::Engine::encode(&b64, &bytes);
-            image_data = Some(format!("{}{}", mime_prefix, encoded));
+            image_bytes = Some(bytes.to_vec());
             break;
         }
     }
 
-    let raw = image_data.ok_or_else(|| {
-        AppError::ValidationError(
-            "Missing field 'image' in multipart form data".into(),
-        )
+    let bytes = image_bytes.ok_or_else(|| {
+        AppError::ValidationError("Missing field 'image' in multipart form data".into())
     })?;
 
-    let avatar_url = user_service.upload_avatar(&raw, &user.id).await?;
+    let ct = content_type.unwrap_or_else(|| "image/jpeg".to_string());
+
+    let avatar_url = user_service.upload_avatar(&bytes, &ct, &user.id).await?;
 
     let profile = user_service
         .update_profile(
             user.id,
             UpdateProfileRequest {
                 display_name: None,
-                avatar_url: Some(avatar_url),
+                avatar_url: Some(avatar_url.clone()),
             },
         )
         .await?;
 
-    tracing::info!("Avatar updated for user {}", user.id);
+    tracing::info!("Avatar uploaded for user {}: {}", user.id, avatar_url);
     Ok((StatusCode::OK, Json(profile)))
 }
