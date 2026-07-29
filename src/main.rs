@@ -88,12 +88,15 @@ use utoipa_swagger_ui::SwaggerUi;
         handlers::users::update_profile,
         handlers::users::update_preferences,
         handlers::users::upload_avatar,
+        handlers::users::delete_avatar,
+        handlers::users::delete_account,
         handlers::notifications::push_subscribe,
         handlers::notifications::push_unsubscribe,
         handlers::notifications::list_push_subscriptions,
     ),
     components(
         schemas(
+            models::user::DeleteAccountRequest,
             models::note::NoteResponse,
             models::note::CreateNoteRequest,
             models::note::UpdateNoteRequest,
@@ -341,6 +344,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/users/profile", put(handlers::users::update_profile))
         .route("/api/v1/users/preferences", put(handlers::users::update_preferences))
         .route("/api/v1/users/avatar", post(handlers::users::upload_avatar))
+        .route("/api/v1/users/avatar", delete(handlers::users::delete_avatar))
+        .route("/api/v1/users/account", delete(handlers::users::delete_account))
         .with_state(user_service);
 
     // === SEARCH ROUTE ===
@@ -362,10 +367,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/notes/:note_id/history/:revision_id/restore", post(handlers::revisions::restore_revision))
         .with_state(revision_service);
 
-    // === WEBSOCKET COLLABORATION ===
+    // === WEBSOCKET COLLABORATION & TICKET ===
     let ws_route = Router::new()
         .route("/api/v1/notes/:id/ws", get(handlers::websocket::note_websocket_handler))
-        .with_state(collab_service);
+        .route("/api/v1/ws/ticket", post(handlers::ws_ticket::create_ws_ticket))
+        .with_state(collab_service)
+        .layer(Extension(redis_manager.clone()));
 
     // === COLLABORATOR ROUTES ===
     let collaborator_routes = Router::new()
@@ -387,7 +394,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .merge(ws_route)
         .merge(collaborator_routes)
         .layer(middleware::from_fn_with_state(
-            (jwt_manager.clone(), pool.clone()),
+            (jwt_manager.clone(), pool.clone(), Some(redis_manager.clone())),
             auth_middleware,
         ))
         .layer(middleware::from_fn_with_state(
@@ -439,7 +446,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         "http_request",
                         request_id = tracing::field::Empty,
                         method = %request.method(),
-                        uri = %request.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or(""),
+                        uri = %request.uri().path(),
                         status_code = tracing::field::Empty,
                     )
                 })
@@ -606,4 +613,5 @@ fn print_api_endpoints() {
     tracing::info!("  DELETE /api/v1/notes/:note_id/collaborators/:target_user_id");
     tracing::info!("  === WebSocket (Protected) ===");
     tracing::info!("  WS     /api/v1/notes/:id/ws");
+    tracing::info!("  POST   /api/v1/ws/ticket");
 }

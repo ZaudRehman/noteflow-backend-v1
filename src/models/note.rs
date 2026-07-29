@@ -1,4 +1,3 @@
-// src/models/note.rs
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -35,20 +34,59 @@ pub struct NoteResponse {
     pub active_users: Vec<ActiveUserInfo>,
     pub collaborators: Vec<CollaboratorInfo>,
     pub permission: String,
+    pub blocks: Vec<BlockData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockData {
+    pub id: Uuid,
+    pub block_type: String,
+    pub data: serde_json::Value,
+    pub position: i32,
+    pub parent_id: Option<Uuid>,
+}
+
+impl From<crate::models::block::Block> for BlockData {
+    fn from(b: crate::models::block::Block) -> Self {
+        Self {
+            id: b.id,
+            block_type: b.block_type,
+            data: b.data,
+            position: b.position,
+            parent_id: b.parent_id,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct CreateNoteRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: String,
-    pub content: Option<String>,
+    pub blocks: Option<Vec<CreateBlockRequest>>,
 }
 
 #[derive(Debug, Deserialize, Validate, ToSchema)]
 pub struct UpdateNoteRequest {
     #[validate(length(min = 1, max = 255))]
     pub title: Option<String>,
-    pub content: Option<String>,
+    pub blocks: Option<Vec<UpdateBlockRequest>>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateBlockRequest {
+    pub block_type: String,
+    pub data: serde_json::Value,
+    pub position: i32,
+    pub parent_id: Option<Uuid>,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateBlockRequest {
+    pub id: Uuid,
+    pub block_type: Option<String>,
+    pub data: Option<serde_json::Value>,
+    pub position: Option<i32>,
+    pub parent_id: Option<Option<Uuid>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
@@ -72,7 +110,7 @@ pub struct NoteFilterParams {
     pub limit: Option<i64>,
     pub sort_by: Option<String>,
     pub sort_order: Option<String>,
-    pub filter: Option<String>, // "favorites", "archived", "all"
+    pub filter: Option<String>,
     pub tag_id: Option<Uuid>,
 }
 

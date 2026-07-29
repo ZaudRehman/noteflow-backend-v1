@@ -24,7 +24,12 @@ fn should_relay_to_client(msg: &WsMessage, note_id: Uuid, user_id: Uuid) -> bool
         | WsMessage::UserLeft { note_id: nid, .. }
         | WsMessage::OpInsert { note_id: nid, .. }
         | WsMessage::OpDelete { note_id: nid, .. }
-        | WsMessage::OpSyncBatch { note_id: nid, .. } => *nid == note_id,
+        | WsMessage::OpSyncBatch { note_id: nid, .. }
+        | WsMessage::BlockAdd { note_id: nid, .. }
+        | WsMessage::BlockUpdate { note_id: nid, .. }
+        | WsMessage::BlockRemove { note_id: nid, .. }
+        | WsMessage::BlockMove { note_id: nid, .. }
+        | WsMessage::BlockSyncBatch { note_id: nid, .. } => *nid == note_id,
         WsMessage::UserJoined {
             note_id: nid,
             user_id: uid,
@@ -71,10 +76,8 @@ impl CollaborationService {
 
     /// Publish to both local in-memory broadcast AND Redis (for other instances)
     fn publish(&self, msg: &WsMessage) {
-        // Local broadcast
         let _ = self.tx.send(msg.clone());
 
-        // Redis broadcast (cross-instance)
         if let Some(ref redis) = self.redis {
             if let Ok(json) = serde_json::to_string(msg) {
                 let note_id = match msg {
@@ -86,7 +89,12 @@ impl CollaborationService {
                     | WsMessage::UserLeft { note_id, .. }
                     | WsMessage::OpInsert { note_id, .. }
                     | WsMessage::OpDelete { note_id, .. }
-                    | WsMessage::OpSyncBatch { note_id, .. } => note_id,
+                    | WsMessage::OpSyncBatch { note_id, .. }
+                    | WsMessage::BlockAdd { note_id, .. }
+                    | WsMessage::BlockUpdate { note_id, .. }
+                    | WsMessage::BlockRemove { note_id, .. }
+                    | WsMessage::BlockMove { note_id, .. }
+                    | WsMessage::BlockSyncBatch { note_id, .. } => note_id,
                     _ => return,
                 };
                 let channel = format!("note:{}", note_id);
@@ -235,6 +243,21 @@ impl CollaborationService {
             WsMessage::OpSyncRequest { last_known_id, .. } => {
                 self.handle_op_sync_request(note_id, last_known_id, ws_tx)
                     .await;
+            }
+            WsMessage::BlockAdd { block_id, block_type, data, position, parent_id, client_id, .. } => {
+                self.handle_block_add(note_id, block_id, &block_type, &data, position, parent_id, &client_id).await;
+            }
+            WsMessage::BlockUpdate { block_id, data, client_id, .. } => {
+                self.handle_block_update(note_id, block_id, &data, &client_id).await;
+            }
+            WsMessage::BlockRemove { block_id, client_id, .. } => {
+                self.handle_block_remove(note_id, block_id, &client_id).await;
+            }
+            WsMessage::BlockMove { block_id, new_position, new_parent_id, client_id, .. } => {
+                self.handle_block_move(note_id, block_id, new_position, new_parent_id, &client_id).await;
+            }
+            WsMessage::BlockSyncBatch { .. } => {
+                self.handle_block_sync_request(note_id, ws_tx).await;
             }
             WsMessage::Ping { .. } => {
                 let pong = WsMessage::Pong {
@@ -413,6 +436,226 @@ impl CollaborationService {
         }
     }
 
+    // ── Block CRDT handlers ──
+
+    async fn handle_block_add(
+        self: &Arc<Self>,
+        note_id: Uuid,
+        block_id: Uuid,
+        block_type: &str,
+        data: &serde_json::Value,
+        position: i32,
+        parent_id: Option<Uuid>,
+        client_id: &str,
+    ) {
+        let result = sqlx::query(
+            r#"
+            INSERT INTO note_blocks (id, note_id, block_type, data, position, parent_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO UPDATE SET
+                block_type = EXCLUDED.block_type,
+                data = EXCLUDED.data,
+                position = EXCLUDED.position,
+                parent_id = EXCLUDED.parent_id,
+                updated_at = NOW()
+            "#,
+        )
+        .bind(block_id)
+        .bind(note_id)
+        .bind(block_type)
+        .bind(data)
+        .bind(position)
+        .bind(parent_id)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::error!("Failed to insert block {}: {}", block_id, e);
+            return;
+        }
+
+        self.rebuild_note_content(note_id).await;
+
+        self.publish(&WsMessage::BlockAdd {
+            note_id,
+            block_id,
+            block_type: block_type.to_string(),
+            data: data.clone(),
+            position,
+            parent_id,
+            client_id: client_id.to_string(),
+            timestamp: Utc::now(),
+        });
+    }
+
+    async fn handle_block_update(
+        self: &Arc<Self>,
+        note_id: Uuid,
+        block_id: Uuid,
+        data: &serde_json::Value,
+        client_id: &str,
+    ) {
+        let result = sqlx::query(
+            "UPDATE note_blocks SET data = $1, updated_at = NOW() WHERE id = $2 AND note_id = $3",
+        )
+        .bind(data)
+        .bind(block_id)
+        .bind(note_id)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::error!("Failed to update block {}: {}", block_id, e);
+            return;
+        }
+
+        self.rebuild_note_content(note_id).await;
+
+        self.publish(&WsMessage::BlockUpdate {
+            note_id,
+            block_id,
+            data: data.clone(),
+            client_id: client_id.to_string(),
+            timestamp: Utc::now(),
+        });
+    }
+
+    async fn handle_block_remove(
+        self: &Arc<Self>,
+        note_id: Uuid,
+        block_id: Uuid,
+        client_id: &str,
+    ) {
+        let result = sqlx::query("DELETE FROM note_blocks WHERE id = $1 AND note_id = $2")
+            .bind(block_id)
+            .bind(note_id)
+            .execute(&self.pool)
+            .await;
+
+        if let Err(e) = result {
+            tracing::error!("Failed to delete block {}: {}", block_id, e);
+            return;
+        }
+
+        self.rebuild_note_content(note_id).await;
+
+        self.publish(&WsMessage::BlockRemove {
+            note_id,
+            block_id,
+            client_id: client_id.to_string(),
+            timestamp: Utc::now(),
+        });
+    }
+
+    async fn handle_block_move(
+        self: &Arc<Self>,
+        note_id: Uuid,
+        block_id: Uuid,
+        new_position: i32,
+        new_parent_id: Option<Uuid>,
+        client_id: &str,
+    ) {
+        let result = sqlx::query(
+            "UPDATE note_blocks SET position = $1, parent_id = $2, updated_at = NOW() WHERE id = $3 AND note_id = $4",
+        )
+        .bind(new_position)
+        .bind(new_parent_id)
+        .bind(block_id)
+        .bind(note_id)
+        .execute(&self.pool)
+        .await;
+
+        if let Err(e) = result {
+            tracing::error!("Failed to move block {}: {}", block_id, e);
+            return;
+        }
+
+        self.publish(&WsMessage::BlockMove {
+            note_id,
+            block_id,
+            new_position,
+            new_parent_id,
+            client_id: client_id.to_string(),
+            timestamp: Utc::now(),
+        });
+    }
+
+    async fn handle_block_sync_request(
+        self: &Arc<Self>,
+        note_id: Uuid,
+        ws_tx: &tokio::sync::mpsc::UnboundedSender<Message>,
+    ) {
+        let blocks = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await;
+
+        let snapshots: Vec<BlockSnapshot> = match blocks {
+            Ok(rows) => rows
+                .into_iter()
+                .map(|b| BlockSnapshot {
+                    id: b.id,
+                    block_type: b.block_type,
+                    data: b.data,
+                    position: b.position,
+                    parent_id: b.parent_id,
+                })
+                .collect(),
+            Err(e) => {
+                tracing::error!("Failed to fetch blocks for sync: {}", e);
+                return;
+            }
+        };
+
+        let msg = WsMessage::BlockSyncBatch {
+            note_id,
+            blocks: snapshots,
+            timestamp: Utc::now(),
+        };
+
+        if let Ok(json) = serde_json::to_string(&msg) {
+            let _ = ws_tx.send(Message::Text(json));
+        }
+    }
+
+    async fn rebuild_note_content(&self, note_id: Uuid) {
+        let blocks = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await;
+
+        let plain_text = match blocks {
+            Ok(blocks) => crate::services::note_service::blocks_to_plain_text(&blocks),
+            Err(e) => {
+                tracing::error!("Failed to fetch blocks for content rebuild: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = sqlx::query("UPDATE notes SET content = $1, updated_at = NOW() WHERE id = $2")
+            .bind(&plain_text)
+            .bind(note_id)
+            .execute(&self.pool)
+            .await
+        {
+            tracing::error!("Failed to rebuild note content: {}", e);
+        }
+    }
+
     /// Periodically apply unapplied collab ops to notes.content and mark them applied.
     async fn apply_pending_ops(&self) {
         let unapplied = sqlx::query_as::<_, (Uuid, i64, String, i32, Option<String>, Option<i32>)>(
@@ -588,11 +831,19 @@ impl CollaborationService {
                 Ok(Message::Ping(data)) => {
                     let _ = ws_tx.send(Message::Pong(data));
                 }
+                Ok(Message::Binary(_)) => {
+                    tracing::debug!("Ignoring unexpected binary frame from user {}", user_id);
+                }
+                Ok(Message::Pong(_)) => {
+                    // unsolicited pong — ignore silently
+                }
                 Err(e) => {
-                    tracing::error!("WebSocket error: {}", e);
+                    tracing::warn!(
+                        "WebSocket closed for user {} on note {} (reason: {})",
+                        user_id, note_id, e
+                    );
                     break;
                 }
-                _ => {}
             }
         }
 

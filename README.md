@@ -48,7 +48,7 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 ### Authentication & Authorization
 - JWT dual-token system with access (1h) and refresh (30d) tokens
 - Secure password storage with bcrypt hashing (cost factor 12)
-- Token rotation — refresh tokens are one-time-use
+- Token rotation: refresh tokens are one-time-use
 - Session listing and revocation across devices
 - User registration, login, and management
 - Account lockout after 10 failed attempts (15-minute lock)
@@ -56,12 +56,14 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 
 ### Note Management
 - Full CRUD operations with ownership verification
+- **Block-based content model**: notes composed of typed blocks (paragraph, heading, list, code, table, chart, image, divider, quote, todo)
 - Favorites and archive organization (toggle endpoints)
 - Soft delete with filter exclusion
 - Advanced filtering by favorite, archived, tag, with sorting
 - Paginated retrieval with configurable page sizes
 - Sorting by created_at, updated_at, or title (ASC/DESC)
-- Configurable content limits (5MB max via request body limit)
+- **Multi-format export**: markdown, HTML, plain text, RTF, PDF, EPUB
+- **Customizable styling**: 7 style parameters for exports (page size, font, font size, theme, border, line spacing, margins) with dark/sepia 10-color palettes
 
 ### Collaboration & Sharing
 - Permission-based collaborator system (owner, edit, view)
@@ -86,7 +88,7 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 
 ### User Management
 - Display name and profile management
-- Avatar upload via multipart/form-data — stored on ImageKit CDN (max 5MB, JPEG/PNG/GIF/WebP)
+- Avatar upload via multipart/form-data, stored on ImageKit CDN (max 5MB, JPEG/PNG/GIF/WebP)
 - Theme preferences (light, dark, system)
 - JSONB custom preferences (language, timezone, editor mode, notification toggles)
 - Password change and reset flows with email notifications
@@ -100,21 +102,21 @@ NoteFlow Backend is a high-performance REST API built with Rust that powers a co
 
 ### Push Notifications
 - RFC 8291 Web Push protocol with VAPID authentication
-- Pure Rust cryptography (AES-256-GCM, ECDH, HKDF — no system OpenSSL)
+- Pure Rust cryptography (AES-256-GCM, ECDH, HKDF, no system OpenSSL)
 - Subscription CRUD (subscribe, unsubscribe, list)
 - Automatic cleanup of expired push endpoints (410 responses)
 - Transactional email via Brevo (300 emails/day free)
 - Notifications on note edits by collaborators and password changes
 
-### Real-Time Collaboration (CRDT/OT)
+### Real-Time Collaboration (Block CRDT)
 - Scalable to 1,000+ concurrent WebSocket connections
-- CRDT operation relay: `op:insert`, `op:delete` stored in `collab_operations` table
-- Late-join sync: `op:sync_request` / `op:sync_batch` for disconnected clients
-- Background task replays unapplied operations against note content (every 10s)
+- **Block-level CRDT relay**: `block:add`, `block:update`, `block:remove`, `block:move` operations
+- Late-join sync: `block:sync_batch` for disconnected clients
 - Per-user connection limit (max 5 concurrent WS connections)
 - Active user presence with cursor position broadcasting
 - Redis pub/sub for multi-instance cross-cluster messaging
 - Automatic cleanup of stale sessions
+- **Ticket-based WS auth**: short-lived (30s), single-use tickets vs. JWT in URL
 
 ### Observability & Operations
 - Prometheus metrics endpoint (`GET /metrics`) with latency histograms
@@ -319,19 +321,19 @@ REDIS_URL=redis://localhost:6379
 JWT_SECRET=your-super-secret-key-minimum-32-characters
 ENCRYPTION_KEY=0123456789abcdef0123456789abcdef   # 32 hex chars for AES-GCM
 
-# Email (Brevo — 300 emails/day free)
+# Email (Brevo, 300 emails/day free)
 BREVO_API_KEY=
 BREVO_FROM_EMAIL=noreply@noteflow.app
 
 # Frontend URL (used in reset password email links)
 SELF_URL=http://localhost:8080
 
-# Web Push VAPID Keys (optional — auto-generated if empty)
+# Web Push VAPID Keys (optional, auto-generated if empty)
 VAPID_PUBLIC_KEY=
 VAPID_PRIVATE_KEY=
 VAPID_SUBJECT=mailto:notifications@noteflow.app
 
-# ImageKit (free tier avatar CDN — get keys from https://imagekit.io)
+# ImageKit (free tier avatar CDN; get keys from https://imagekit.io)
 IMAGEKIT_PRIVATE_KEY=
 
 ```
@@ -444,7 +446,7 @@ Authorization: Bearer <access_token>
 | `DELETE` | `/api/v1/notes/:id` | Soft delete note |
 | `POST` | `/api/v1/notes/:id/favorite` | Toggle favorite status |
 | `POST` | `/api/v1/notes/:id/archive` | Toggle archive status |
-| `GET` | `/api/v1/notes/:id/export?format=json\|markdown` | Export note content |
+| `GET` | `/api/v1/notes/:id/export?format=markdown\|html\|txt\|rtf\|pdf\|epub&page_size=&font=&font_size=&theme=&border=&line_spacing=&margins=` | Export note (7 formats, 7 style params) |
 
 #### Collaborators (Protected)
 
@@ -498,11 +500,14 @@ Authorization: Bearer <access_token>
 | `POST` | `/api/v1/notifications/push/subscribe` | Subscribe browser to push |
 | `DELETE` | `/api/v1/notifications/push/subscribe/:id` | Unsubscribe from push |
 
-#### WebSocket (Protected — token as query param)
+#### WebSocket (Protected, ticket-based auth)
 
 | Protocol | Endpoint | Description |
 |----------|----------|-------------|
-| `WS` | `/api/v1/notes/:id/ws?token=<access_token>` | Real-time collaboration (CRDT ops, cursors, presence) |
+| `POST` | `/api/v1/ws/ticket` | Obtain short-lived WS ticket (`Authorization: Bearer` + `{ "note_id": "uuid" }`) → `{ "ticket": "64-char-hex", "expires_in": 30 }` |
+| `WS` | `/api/v1/notes/:id/ws?ticket=<64-char-hex>` | Real-time collaboration (block CRDT ops, cursors, presence) |
+
+JWT is **never** passed in URL query strings. Client calls `POST /api/v1/ws/ticket` with JWT in header to get a 30s single-use ticket, then passes `?ticket=` to the WS upgrade URL. Legacy `?token=` kept as fallback.
 
 ### HTTP Status Codes
 
@@ -570,7 +575,8 @@ Authorization: Bearer <access_token>
              |
              | 1:N
              |
-             v
+              | 1:N
+              v
   +-------------------------------+
   |  note_collaborators           |
   +-------------------------------+
@@ -580,21 +586,20 @@ Authorization: Bearer <access_token>
   | invited_by (FK)               |
   | created_at                    |
   +-------------------------------+
-             |
-             | 1:N
-             v
+
+              | 1:N
+              v
   +-------------------------------+
-  |  collab_operations            |
+  |  note_blocks                  |
   +-------------------------------+
-  | id (PK, BIGSERIAL)            |
+  | id (PK, UUID)                 |
   | note_id (FK)                  |
-  | client_id                     |
-  | op_type (insert/delete)       |
+  | block_type                    |
+  | data (JSONB)                  |
   | position (INT)                |
-  | text_content                  |
-  | length (INT)                  |
-  | applied (BOOL)                |
+  | parent_id (FK, self-ref)      |
   | created_at                    |
+  | updated_at                    |
   +-------------------------------+
 
     +-----------------------------+     +--------------------------------+
@@ -770,35 +775,36 @@ CREATE TABLE note_collaborators (
 );
 ```
 
-#### Collab Operations (new — CRDT relay buffer)
+#### Note Blocks (block-based content model)
+
+Replaces flat `notes.content` with typed, ordered blocks.
 
 ```sql
-CREATE TABLE collab_operations (
-    id BIGSERIAL PRIMARY KEY,
+CREATE TABLE note_blocks (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     note_id UUID NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-    client_id VARCHAR(64) NOT NULL,
-    op_type VARCHAR(20) NOT NULL CHECK (op_type IN ('insert', 'delete')),
-    position INTEGER NOT NULL,
-    text_content TEXT,
-    length INTEGER,
-    applied BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    block_type VARCHAR(50) NOT NULL,
+    data JSONB NOT NULL DEFAULT '{}'::jsonb,
+    position INTEGER NOT NULL DEFAULT 0,
+    parent_id UUID REFERENCES note_blocks(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX idx_collab_ops_note ON collab_operations(note_id, id);
+CREATE INDEX idx_note_blocks_note_id ON note_blocks(note_id, position);
 
--- Auto-cleanup: delete applied ops older than 1 hour
-CREATE OR REPLACE FUNCTION cleanup_collab_operations()
+CREATE OR REPLACE FUNCTION update_note_updated_at()
 RETURNS TRIGGER AS $$ BEGIN
-    DELETE FROM collab_operations
-    WHERE applied = TRUE AND created_at < NOW() - INTERVAL '1 hour';
+    UPDATE notes SET updated_at = NOW() WHERE id = NEW.note_id;
     RETURN NEW;
 END; $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER trigger_cleanup_collab_ops
-    AFTER INSERT ON collab_operations
-    EXECUTE FUNCTION cleanup_collab_operations();
+CREATE TRIGGER trigger_note_updated_at
+    AFTER INSERT OR DELETE OR UPDATE ON note_blocks
+    FOR EACH ROW EXECUTE FUNCTION update_note_updated_at();
 ```
+
+**Supported block types**: `paragraph`, `heading`, `bullet_list`, `numbered_list`, `todo_list`, `quote`, `code`, `divider`, `table`, `image`, `chart`. See [API docs](#api-documentation) for data schemas.
 
 ### Database Optimizations
 
@@ -821,51 +827,45 @@ CREATE TRIGGER trigger_cleanup_collab_ops
 ### Connection Flow
 
 ```
-Client connects: wss://host/api/v1/notes/{note_id}/ws?token=<access_token>
+1. CLIENT: POST /api/v1/ws/ticket  (Authorization: Bearer <jwt>)
+   BODY: { "note_id": "uuid" }
+   SERVER: { "ticket": "64-char-hex", "expires_in": 30 }
 
-Server verifies JWT, checks note access, checks per-user WS limit (max 5)
-+-- Rejects with error if limit exceeded
-+-- Creates active_session record
-+-- Broadcasts "user:joined" to all other connected clients
+2. CLIENT: wss://host/api/v1/notes/{note_id}/ws?ticket=<64-char-hex>
 
-Client sends cursor moves, edits, or CRDT operations
-+-- Relayed to all other connections for this note
-+-- CRDT ops stored in collab_operations table
-+-- Published to Redis for other instances
+   Server validates ticket against Redis, deletes on first use
+   +-- Checks note access
+   +-- Checks per-user WS limit (max 5)
+   +-- Rejects with error if limit exceeded
+   +-- Creates active_session record
+   +-- Broadcasts "user:joined" to all other connected clients
 
-Client sends "op:sync_request" with last_known_id
-+-- Server responds with "op:sync_batch" of all missed ops
+3. Client sends cursor moves, block edits, or block CRDT operations
+   +-- "block:add", "block:update", "block:remove", "block:move"
+   +-- Relayed to all other connections for this note
+   +-- Note content rebuilt from blocks after updates
+   +-- Published to Redis for other instances
 
-Client receives updates from other users
-+-- Updates editor content, cursor positions, presence list
+4. Client sends "block:sync_request"
+   +-- Server responds with "block:sync_batch" of all current blocks
 
-Background task (every 10 seconds)
-+-- Replays unapplied CRDT ops against notes.content
-+-- Marks ops as applied
+5. Client receives updates from other users
+   +-- Updates editor blocks, cursor positions, presence list
 
-Client sends "ping" every 30 seconds
-+-- Server responds with "pong"
+6. Client sends "ping" every 30 seconds
+   +-- Server responds with "pong"
 
-Client disconnects (navigates away, closes tab, timeout)
-+-- Deletes active_session record
-+-- Broadcasts "user:left" event
-+-- Decrements per-user connection counter
+7. Client disconnects (navigates away, closes tab, timeout)
+   +-- Deletes active_session record
+   +-- Broadcasts "user:left" event
+   +-- Decrements per-user connection counter
 ```
 
 ### Client → Server Message Types
 
 ```typescript
 // Heartbeat
-{ "type": "ping", "timestamp": "2025-12-13T..." }
-
-// Note content update (broadcast to other clients)
-{
-  "type": "note:updated",
-  "note_id": "uuid",
-  "title": "string (optional)",
-  "content_delta": "string (optional)",
-  "timestamp": "2025-12-13T..."
-}
+{ "type": "ping", "timestamp": "ISO8601" }
 
 // Cursor position (throttled, broadcast to other clients)
 {
@@ -874,35 +874,57 @@ Client disconnects (navigates away, closes tab, timeout)
   "user_id": "uuid",
   "user_name": "John Doe",
   "position": { "line": 5, "column": 12 },
-  "timestamp": "2025-12-13T..."
+  "timestamp": "ISO8601"
 }
 
-// CRDT: Insert operation (stored + relayed)
+// Block: Add a new block (relayed to other clients)
 {
-  "type": "op:insert",
+  "type": "block:add",
   "note_id": "uuid",
-  "client_id": "browser-session-uuid",
-  "position": 42,
-  "text": "hello",
-  "timestamp": "2025-12-13T..."
+  "block_id": "uuid",
+  "block_type": "paragraph",
+  "data": { "text": "Hello" },
+  "position": 0,
+  "parent_id": null,
+  "client_id": "session-uuid",
+  "timestamp": "ISO8601"
 }
 
-// CRDT: Delete operation (stored + relayed)
+// Block: Update block data (relayed to other clients)
 {
-  "type": "op:delete",
+  "type": "block:update",
   "note_id": "uuid",
-  "client_id": "browser-session-uuid",
-  "position": 10,
-  "length": 5,
-  "timestamp": "2025-12-13T..."
+  "block_id": "uuid",
+  "data": { "text": "Updated" },
+  "client_id": "session-uuid",
+  "timestamp": "ISO8601"
 }
 
-// CRDT: Sync request (sent on reconnect)
+// Block: Remove a block (relayed to other clients)
 {
-  "type": "op:sync_request",
+  "type": "block:remove",
   "note_id": "uuid",
-  "last_known_id": 123,
-  "timestamp": "2025-12-13T..."
+  "block_id": "uuid",
+  "client_id": "session-uuid",
+  "timestamp": "ISO8601"
+}
+
+// Block: Move block to new position/parent (relayed to other clients)
+{
+  "type": "block:move",
+  "note_id": "uuid",
+  "block_id": "uuid",
+  "new_position": 2,
+  "new_parent_id": null,
+  "client_id": "session-uuid",
+  "timestamp": "ISO8601"
+}
+
+// Block: Sync request (sent on reconnect to get all blocks)
+{
+  "type": "block:sync_request",
+  "note_id": "uuid",
+  "timestamp": "ISO8601"
 }
 ```
 
@@ -910,17 +932,7 @@ Client disconnects (navigates away, closes tab, timeout)
 
 ```typescript
 // Heartbeat response
-{ "type": "pong", "timestamp": "2025-12-13T..." }
-
-// Note update from another user (apply to editor)
-{
-  "type": "note:updated",
-  "note_id": "uuid",
-  "user_id": "uuid",
-  "title": "string (optional)",
-  "content_delta": "string (optional)",
-  "timestamp": "2025-12-13T..."
-}
+{ "type": "pong", "timestamp": "ISO8601" }
 
 // Cursor from another user (render colored indicator)
 {
@@ -929,29 +941,31 @@ Client disconnects (navigates away, closes tab, timeout)
   "user_id": "uuid",
   "user_name": "Jane Smith",
   "position": { "line": 5, "column": 12 },
-  "timestamp": "2025-12-13T..."
+  "timestamp": "ISO8601"
 }
 
 // Presence
-{ "type": "user:joined",  "note_id": "uuid", "user_id": "uuid", "user_name": "string", "timestamp": "..." }
-{ "type": "user:left",    "note_id": "uuid", "user_id": "uuid", "timestamp": "..." }
+{ "type": "user:joined",  "note_id": "uuid", "user_id": "uuid", "user_name": "string", "timestamp": "ISO8601" }
+{ "type": "user:left",    "note_id": "uuid", "user_id": "uuid", "timestamp": "ISO8601" }
 
-// CRDT operations from other users (apply using CRDT logic)
-{ "type": "op:insert",    "note_id": "uuid", "client_id": "string", "position": 42, "text": "hello", "timestamp": "..." }
-{ "type": "op:delete",    "note_id": "uuid", "client_id": "string", "position": 10, "length": 5, "timestamp": "..." }
+// Block operations from other users
+{ "type": "block:add",    "note_id": "uuid", "block_id": "uuid", "block_type": "string", "data": {...}, "position": 0, "parent_id": null, "client_id": "string", "timestamp": "ISO8601" }
+{ "type": "block:update", "note_id": "uuid", "block_id": "uuid", "data": {...}, "client_id": "string", "timestamp": "ISO8601" }
+{ "type": "block:remove", "note_id": "uuid", "block_id": "uuid", "client_id": "string", "timestamp": "ISO8601" }
+{ "type": "block:move",   "note_id": "uuid", "block_id": "uuid", "new_position": 2, "new_parent_id": null, "client_id": "string", "timestamp": "ISO8601" }
 
-// CRDT sync batch (response to sync_request)
+// Block sync batch (response to sync_request)
 {
-  "type": "op:sync_batch",
+  "type": "block:sync_batch",
   "note_id": "uuid",
-  "ops": [
-    { "id": 456, "op_type": "insert", "position": 42, "text_content": "hello", ... }
+  "blocks": [
+    { "id": "uuid", "block_type": "paragraph", "data": { "text": "..." }, "position": 0, "parent_id": null }
   ],
-  "timestamp": "2025-12-13T..."
+  "timestamp": "ISO8601"
 }
 
 // Error
-{ "type": "error", "message": "string", "timestamp": "..." }
+{ "type": "error", "message": "string", "timestamp": "ISO8601" }
 ```
 
 ### Multi-Instance Sync
@@ -962,11 +976,12 @@ Instance 1 --+
 Instance 2 --+
 ```
 
-### WS Rate Limiting
+### WS Rate Limiting & Security
 
 - Maximum 5 concurrent WebSocket connections per user account
 - Connections exceeding the limit are rejected immediately with an error message
 - Counter decremented on clean disconnect or timeout (60s without ping)
+- JWT never appears in URL query strings; short-lived (30s) single-use tickets are obtained via `POST /api/v1/ws/ticket`
 
 ---
 
@@ -1044,7 +1059,7 @@ ENCRYPTION_KEY=<32-bytes-as-hex>
 # Logging
 RUST_LOG=info
 
-# Email (Brevo — 300 emails/day free)
+# Email (Brevo, 300 emails/day free)
 BREVO_API_KEY=<your-brevo-api-key>
 BREVO_FROM_EMAIL=noreply@noteflow.app
 
@@ -1091,6 +1106,7 @@ noteflow-backend/
 |   +-- 20251213000012_create_collab_operations.sql     
 |   +-- 20251213000013_add_account_lockout.sql          
 |   +-- 20251213000014_add_missing_indexes.sql          
+|   +-- 20260729000001_create_note_blocks.sql
 
 +-- src/
     +-- main.rs                         # Application entry, router, Prometheus setup
@@ -1104,7 +1120,8 @@ noteflow-backend/
     |   +-- revision.rs                 # Revision models
     |   +-- tag.rs                      # Tag models
     |   +-- session.rs                  # Active session model
-    |   +-- collaboration.rs            # WsMessage enum + CRDT types
+    |   +-- block.rs                     # Block model
+    |   +-- collaboration.rs            # WsMessage enum + block CRDT types
 
     +-- db/                             # Database layer
     |   +-- mod.rs
@@ -1120,11 +1137,13 @@ noteflow-backend/
     |   +-- user_service.rs             # Profile, avatar, preferences
     |   +-- revision_service.rs         # Version history
     |   +-- notification_service.rs     # Web Push + Brevo email
-    |   +-- collaboration_service.rs    # WS lifecycle, CRDT relay, background tasks
+    |   +-- export_service.rs           # Multi-format export with styling (markdown, html, txt, rtf, pdf, epub)
+    |   +-- collaboration_service.rs    # WS lifecycle, block CRDT relay
 
     +-- handlers/                       # HTTP + WebSocket handlers
     |   +-- mod.rs
     |   +-- auth.rs                     # Auth endpoints
+    |   +-- ws_ticket.rs               # POST /api/v1/ws/ticket (short-lived WS ticket)
     |   +-- notes.rs                    # Note CRUD, favorite, archive, export, search
     |   +-- tags.rs                     # Tag management
     |   +-- collaborators.rs            # Share/invite management
@@ -1154,7 +1173,7 @@ noteflow-backend/
 ### Authentication
 - JWT tokens with HS256 algorithm (HMAC-SHA256)
 - Short-lived access tokens (1h) and long-lived refresh tokens (30d)
-- Token rotation — every refresh invalidates the old token and issues a new one
+- Token rotation: every refresh invalidates the old token and issues a new one
 - Session listing and revocation from any device
 - Stateless design with no server-side session storage
 
@@ -1194,7 +1213,7 @@ Incoming Request
   → RequestId middleware         (UUID + X-Request-Id header)
   → TraceLayer                   (structured span logging)
   → Rate Limit middleware        (IP + per-email limits)
-  → Auth middleware               (JWT verification)
+  → Auth middleware / OptionalAuth middleware  (JWT/ticket verification)
     → Handler
 ```
 

@@ -38,36 +38,25 @@ impl NoteService {
         let title = validation::sanitize_string(&req.title);
         validation::validate_note_title(&title)?;
 
-        let content = req.content.unwrap_or_default();
-        validation::validate_note_content(&content, self.config.max_note_size)?;
-
         let note = sqlx::query!(
             r#"INSERT INTO notes (user_id, title, content, last_edited_by)
-               VALUES ($1, $2, $3, $1)
+               VALUES ($1, $2, '', $1)
                RETURNING id, user_id, title, content, last_edited_by, 
                          is_favorited, is_archived, is_deleted, created_at, updated_at"#,
             user_id,
-            title,
-            content
+            title
         )
         .fetch_one(&self.pool)
         .await?;
 
-        Ok(NoteResponse {
-            id: note.id,
-            user_id: note.user_id,
-            title: note.title,
-            content: note.content,
-            last_edited_by: note.last_edited_by,
-            is_favorited: note.is_favorited,
-            is_archived: note.is_archived,
-            created_at: note.created_at,
-            updated_at: note.updated_at,
-            tags: vec![],
-            active_users: vec![],
-            collaborators: vec![],
-            permission: "owner".into(),
-        })
+        if let Some(blocks) = &req.blocks {
+            for block in blocks {
+                self.insert_block(note.id, block).await?;
+            }
+            self.rebuild_content(note.id).await?;
+        }
+
+        self.get(note.id, user_id).await
     }
 
     pub async fn get(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
@@ -98,6 +87,7 @@ impl NoteService {
 
         let active_users = self.get_active_users(note_id).await?;
         let collaborators = self.collab_service.get_note_collaborators(note_id).await?;
+        let blocks = self.get_note_blocks(note_id).await?;
 
         Ok(NoteResponse {
             id: note.id,
@@ -113,6 +103,7 @@ impl NoteService {
             active_users,
             collaborators,
             permission,
+            blocks,
         })
     }
 
@@ -161,6 +152,7 @@ impl NoteService {
         let tags_map = self.batch_get_tags_map(&note_ids).await?;
         let active_users_map = self.batch_get_active_users_map(&note_ids).await?;
         let collab_map = self.collab_service.batch_get_note_collaborators(&note_ids).await?;
+        let blocks_map = self.batch_get_blocks_map(&note_ids).await?;
 
         let mut responses = Vec::with_capacity(rows.len());
         for row in rows {
@@ -188,6 +180,7 @@ impl NoteService {
                 active_users: active_users_map.get(&note_id).cloned().unwrap_or_default(),
                 collaborators: collab_map.get(&note_id).cloned().unwrap_or_default(),
                 permission,
+                blocks: blocks_map.get(&note_id).cloned().unwrap_or_default(),
             });
         }
         Ok(responses)
@@ -215,18 +208,25 @@ impl NoteService {
         .await?
         .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
 
-        let title = req.title.unwrap_or(note.title);
-        let content = req.content.unwrap_or(note.content);
+        let title = match req.title {
+            Some(ref t) => {
+                let t = validation::sanitize_string(t);
+                validation::validate_note_title(&t)?;
+                t
+            }
+            None => note.title.clone(),
+        };
 
-        validation::validate_note_title(&title)?;
-        validation::validate_note_content(&content, self.config.max_note_size)?;
+        if let Some(blocks) = &req.blocks {
+            self.sync_blocks(note_id, blocks).await?;
+            self.rebuild_content(note_id).await?;
+        }
 
         sqlx::query!(
             r#"UPDATE notes 
-               SET title = $1, content = $2, last_edited_by = $3, updated_at = NOW()
-               WHERE id = $4"#,
+               SET title = $1, last_edited_by = $2, updated_at = NOW()
+               WHERE id = $3"#,
             title,
-            content,
             user_id,
             note_id
         )
@@ -445,6 +445,152 @@ impl NoteService {
             .map(|notes| SearchResponse { notes, total, query })
     }
 
+    // ── Block operations ──
+
+    async fn insert_block(&self, note_id: Uuid, block: &CreateBlockRequest) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO note_blocks (note_id, block_type, data, position, parent_id)
+            VALUES ($1, $2, $3, $4, $5)
+            "#,
+        )
+        .bind(note_id)
+        .bind(&block.block_type)
+        .bind(&block.data)
+        .bind(block.position)
+        .bind(block.parent_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn get_note_blocks(&self, note_id: Uuid) -> Result<Vec<BlockData>> {
+        let rows = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(BlockData::from).collect())
+    }
+
+    async fn batch_get_blocks_map(&self, note_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<BlockData>>> {
+        if note_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let rows = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = ANY($1)
+            ORDER BY note_id, position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map: HashMap<Uuid, Vec<BlockData>> = HashMap::new();
+        for row in rows {
+            let nid = row.note_id;
+            map.entry(nid).or_default().push(BlockData::from(row));
+        }
+        Ok(map)
+    }
+
+    async fn sync_blocks(&self, note_id: Uuid, blocks: &[UpdateBlockRequest]) -> Result<()> {
+        for block in blocks {
+            if let Some(block_type) = &block.block_type {
+                sqlx::query(
+                    r#"
+                    INSERT INTO note_blocks (note_id, block_type, data, position, parent_id)
+                    VALUES ($1, $2, '{}'::jsonb, 0, NULL)
+                    RETURNING id
+                    "#,
+                )
+                .bind(note_id)
+                .bind(block_type)
+                .execute(&self.pool)
+                .await?;
+            } else {
+                let mut set_clauses = Vec::new();
+                let mut param_count = 0;
+
+                if block.data.is_some() {
+                    param_count += 1;
+                    set_clauses.push(format!("data = ${}", param_count + 1));
+                }
+                if block.position.is_some() {
+                    param_count += 1;
+                    set_clauses.push(format!("position = ${}", param_count + 1));
+                }
+                if block.parent_id.is_some() {
+                    param_count += 1;
+                    set_clauses.push(format!("parent_id = ${}", param_count + 1));
+                }
+
+                if set_clauses.is_empty() {
+                    continue;
+                }
+
+                let sql = format!(
+                    "UPDATE note_blocks SET {} WHERE id = $1 AND note_id = $2",
+                    set_clauses.join(", ")
+                );
+
+                let mut q = sqlx::query(&sql).bind(block.id).bind(note_id);
+
+                if let Some(ref data) = block.data {
+                    q = q.bind(data);
+                }
+                if let Some(pos) = block.position {
+                    q = q.bind(pos);
+                }
+                if let Some(pid) = block.parent_id {
+                    q = q.bind(pid);
+                }
+
+                q.execute(&self.pool).await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn rebuild_content(&self, note_id: Uuid) -> Result<()> {
+        let blocks = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let plain_text = blocks_to_plain_text(&blocks);
+
+        sqlx::query!(
+            "UPDATE notes SET content = $1, updated_at = NOW() WHERE id = $2",
+            plain_text,
+            note_id
+        )
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
+    }
+
+    // ── Helpers ──
+
     async fn batch_get_tags_map(&self, note_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<String>>> {
         if note_ids.is_empty() {
             return Ok(HashMap::new());
@@ -548,4 +694,80 @@ impl NoteService {
             })
             .collect())
     }
+
+    pub async fn get_all_blocks(&self, note_id: Uuid) -> Result<Vec<crate::models::block::Block>> {
+        let blocks = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(blocks)
+    }
+}
+
+/// Convert blocks to plain text for full-text search indexing
+pub fn blocks_to_plain_text(blocks: &[crate::models::block::Block]) -> String {
+    let mut parts = Vec::new();
+    for block in blocks {
+        match block.block_type.as_str() {
+            "heading" | "paragraph" => {
+                if let Some(text) = block.data.get("text").and_then(|v| v.as_str()) {
+                    parts.push(text.to_string());
+                }
+            }
+            "code" => {
+                if let Some(text) = block.data.get("code").and_then(|v| v.as_str()) {
+                    parts.push(text.to_string());
+                }
+            }
+            "table" => {
+                if let Some(rows) = block.data.get("rows").and_then(|v| v.as_array()) {
+                    for row in rows {
+                        if let Some(cells) = row.as_array() {
+                            for cell in cells {
+                                if let Some(s) = cell.as_str() {
+                                    parts.push(s.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            "chart" => {
+                if let Some(title) = block.data.get("title").and_then(|v| v.as_str()) {
+                    parts.push(title.to_string());
+                }
+                if let Some(labels) = block.data.get("labels").and_then(|v| v.as_array()) {
+                    for label in labels {
+                        if let Some(s) = label.as_str() {
+                            parts.push(s.to_string());
+                        }
+                    }
+                }
+            }
+            "quote" => {
+                if let Some(text) = block.data.get("text").and_then(|v| v.as_str()) {
+                    parts.push(text.to_string());
+                }
+            }
+            "bullet_list" | "numbered_list" | "todo_list" => {
+                if let Some(items) = block.data.get("items").and_then(|v| v.as_array()) {
+                    for item in items {
+                        if let Some(text) = item.get("text").and_then(|v| v.as_str()) {
+                            parts.push(text.to_string());
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    parts.join("\n")
 }

@@ -118,17 +118,49 @@ pub async fn upload_avatar(
     let ct = content_type.unwrap_or_else(|| "image/jpeg".to_string());
 
     let avatar_url = user_service.upload_avatar(&bytes, &ct, &user.id).await?;
-
-    let profile = user_service
-        .update_profile(
-            user.id,
-            UpdateProfileRequest {
-                display_name: None,
-                avatar_url: Some(avatar_url.clone()),
-            },
-        )
-        .await?;
+    let profile = user_service.get_profile(user.id).await?;
 
     tracing::info!("Avatar uploaded for user {}: {}", user.id, avatar_url);
     Ok((StatusCode::OK, Json(profile)))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/users/avatar",
+    tag = "Users",
+    responses(
+        (status = 200, description = "Avatar deleted"),
+        (status = 404, description = "No avatar set"),
+    ),
+)]
+pub async fn delete_avatar(
+    State(user_service): State<Arc<UserService>>,
+    Extension(user): Extension<User>,
+) -> Result<Json<UserProfile>> {
+    user_service.delete_avatar(user.id).await?;
+    let profile = user_service.get_profile(user.id).await?;
+    Ok(Json(profile))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/users/account",
+    tag = "Users",
+    request_body = DeleteAccountRequest,
+    responses(
+        (status = 200, description = "Account deleted successfully"),
+        (status = 401, description = "Invalid password"),
+    ),
+)]
+pub async fn delete_account(
+    State(user_service): State<Arc<UserService>>,
+    Extension(user): Extension<User>,
+    Json(req): Json<DeleteAccountRequest>,
+) -> Result<(StatusCode, Json<serde_json::Value>)> {
+    user_service.delete_account(user.id, &req.password).await?;
+    tracing::info!("Account deleted for user {}", user.id);
+    Ok((
+        StatusCode::OK,
+        Json(serde_json::json!({ "message": "Account deleted successfully" })),
+    ))
 }

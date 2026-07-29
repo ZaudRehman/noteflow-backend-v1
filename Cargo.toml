@@ -60,7 +60,9 @@ url = "2"
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 
-
+# Export formats
+printpdf = "0.7"
+epub-builder = "0.7"
 
 [dev-dependencies]
 tokio-test = "0.4"

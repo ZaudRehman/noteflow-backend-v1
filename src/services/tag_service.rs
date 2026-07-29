@@ -322,6 +322,7 @@ impl TagService {
         let tags_map = self.batch_get_notes_tags(&note_ids).await?;
         let active_users_map = self.batch_get_active_users_map(&note_ids).await?;
         let collab_map = self.collab_service.batch_get_note_collaborators(&note_ids).await?;
+        let blocks_map = self.batch_get_blocks_map(&note_ids).await?;
 
         let mut responses = Vec::with_capacity(notes.len());
         for note in notes {
@@ -345,6 +346,7 @@ impl TagService {
                 active_users: active_users_map.get(&note.id).cloned().unwrap_or_default(),
                 collaborators: collab_map.get(&note.id).cloned().unwrap_or_default(),
                 permission,
+                blocks: blocks_map.get(&note.id).cloned().unwrap_or_default(),
             });
         }
 
@@ -412,6 +414,30 @@ impl TagService {
                 cursor_line: row.try_get("cursor_line").unwrap_or(0),
                 cursor_column: row.try_get("cursor_column").unwrap_or(0),
             });
+        }
+        Ok(map)
+    }
+
+    async fn batch_get_blocks_map(&self, note_ids: &[Uuid]) -> Result<HashMap<Uuid, Vec<crate::models::note::BlockData>>> {
+        if note_ids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let rows = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = ANY($1)
+            ORDER BY note_id, position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_ids)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut map: HashMap<Uuid, Vec<crate::models::note::BlockData>> = HashMap::new();
+        for row in rows {
+            let nid = row.note_id;
+            map.entry(nid).or_default().push(crate::models::note::BlockData::from(row));
         }
         Ok(map)
     }

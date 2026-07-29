@@ -8,14 +8,17 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::db::RedisManager;
 use crate::models::user::User;
 use crate::utils::{errors::AppError, jwt::JwtManager};
 use tracing::Span;
 
-/// Middleware to authenticate requests using JWT tokens
-/// Extracts the Bearer token from Authorization header, verifies it,fetches the user from database and injects user into request extensions
+/// Middleware to authenticate requests using JWT tokens or WS tickets.
+/// State is (JwtManager, PgPool, Option<Arc<RedisManager>>).
+/// For WebSocket upgrades without an Authorization header, a short-lived
+/// ticket from ?ticket= is validated against Redis instead of a raw JWT.
 pub async fn auth_middleware(
-    State((jwt_manager, pool)): State<(Arc<JwtManager>, PgPool)>,
+    State((jwt_manager, pool, redis)): State<(Arc<JwtManager>, PgPool, Option<Arc<RedisManager>>)>,
     mut req: Request,
     next: Next,
 ) -> Result<Response, AppError> {
@@ -33,7 +36,6 @@ pub async fn auth_middleware(
         "/api/v1/auth/refresh",
     ];
 
-    // Check if current path is public
     if public_routes
         .iter()
         .any(|route| path == *route || path.starts_with(route))
@@ -50,39 +52,71 @@ pub async fn auth_middleware(
 
     tracing::debug!("Protected route, checking auth: {}", path);
 
-    // Extract token from Authorization header or URL query string (for WebSockets)
-    let token = match req
+    // -- Extract auth material: header first, then query string --
+    let (auth_method, token_or_ticket): (&str, String) = match req
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok())
         .and_then(|h| h.strip_prefix("Bearer "))
     {
-        Some(t) => Some(t.to_string()),
+        Some(t) => ("jwt", t.to_string()),
         None => {
-            // If no header, check query string for "token="
-            req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find(|param| param.starts_with("token="))
-                    .map(|param| param["token=".len()..].to_string())
-            })
+            // Check query string for "ticket=" (short-lived WS ticket) or
+            // fall back to "token=" (legacy, kept temporarily for migration).
+            let q = req.uri().query().unwrap_or("");
+            q.split('&')
+                .find(|p| p.starts_with("ticket="))
+                .map(|p| ("ticket", p["ticket=".len()..].to_string()))
+                .or_else(|| {
+                    q.split('&')
+                        .find(|p| p.starts_with("token="))
+                        .map(|p| ("token", p["token=".len()..].to_string()))
+                })
+                .ok_or_else(|| {
+                    tracing::warn!("Missing or invalid Authorization header/param for: {}", path);
+                    AppError::AuthenticationError("Missing authorization token".to_string())
+                })?
         }
-    }
-    .ok_or_else(|| {
-        tracing::warn!("Missing or invalid Authorization header/param for: {}", path);
-        AppError::AuthenticationError("Missing authorization token".to_string())
-    })?;
+    };
 
-    // Verify JWT token
-    let claims = jwt_manager.verify_access_token(&token).map_err(|e| {
-        tracing::warn!("Token verification failed: {}", e);
-        e
-    })?;
-
-    // Parse user ID from claims
-    let user_id = Uuid::parse_str(&claims.sub).map_err(|_| {
-        tracing::error!("Invalid user ID format in token: {}", claims.sub);
-        AppError::AuthenticationError("Invalid user ID in token".to_string())
-    })?;
+    // -- Resolve user from JWT or ticket --
+    let user_id = match auth_method {
+        "jwt" | "token" => {
+            let claims = jwt_manager.verify_access_token(&token_or_ticket).map_err(|e| {
+                tracing::warn!("Token verification failed: {}", e);
+                e
+            })?;
+            Uuid::parse_str(&claims.sub).map_err(|_| {
+                tracing::error!("Invalid user ID format in token: {}", claims.sub);
+                AppError::AuthenticationError("Invalid user ID in token".to_string())
+            })?
+        }
+        "ticket" => {
+            match &redis {
+                Some(redis) => {
+                    let key = format!("ws_ticket:{}", token_or_ticket);
+                    let val = redis.get(&key).await?.ok_or_else(|| {
+                        tracing::warn!("Invalid or expired ticket for: {}", path);
+                        AppError::AuthenticationError("Invalid or expired ticket".to_string())
+                    })?;
+                    // value is "user_id:note_id"
+                    let uid = val.split(':').next().unwrap_or("").to_string();
+                    redis.delete(&key).await?; // single-use
+                    Uuid::parse_str(&uid).map_err(|_| {
+                        tracing::error!("Invalid user ID in ticket payload");
+                        AppError::AuthenticationError("Invalid ticket payload".to_string())
+                    })?
+                }
+                None => {
+                    tracing::warn!("Redis not available — cannot validate ticket for: {}", path);
+                    return Err(AppError::AuthenticationError(
+                        "Ticket auth requires Redis".to_string(),
+                    ));
+                }
+            }
+        }
+        _ => unreachable!(),
+    };
 
     // Fetch user from database
     let user = sqlx::query_as!(
@@ -105,10 +139,8 @@ pub async fn auth_middleware(
     tracing::debug!("Authenticated user: {} ({})", user.email, user.id);
     Span::current().record("user_id", &tracing::field::display(user.id));
 
-    // Insert user into request extensions for handlers to access
     req.extensions_mut().insert(user);
 
-    // Continue to next middleware/handler
     Ok(next.run(req).await)
 }
 

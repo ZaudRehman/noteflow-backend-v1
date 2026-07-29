@@ -145,4 +145,9 @@ pub struct SessionListResponse {
     pub total: i64,
 }
 
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct DeleteAccountRequest {
+    pub password: String,
+}
+
 

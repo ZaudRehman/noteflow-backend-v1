@@ -1,4 +1,3 @@
-// src/models/collaboration.rs
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -90,8 +89,55 @@ pub enum WsMessage {
     #[serde(rename = "pong")]
     Pong { timestamp: DateTime<Utc> },
 
-    // === CRDT Operations ===
+    // === Block-level CRDT Operations ===
 
+    #[serde(rename = "block:add")]
+    BlockAdd {
+        note_id: Uuid,
+        block_id: Uuid,
+        block_type: String,
+        data: serde_json::Value,
+        position: i32,
+        parent_id: Option<Uuid>,
+        client_id: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "block:update")]
+    BlockUpdate {
+        note_id: Uuid,
+        block_id: Uuid,
+        data: serde_json::Value,
+        client_id: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "block:remove")]
+    BlockRemove {
+        note_id: Uuid,
+        block_id: Uuid,
+        client_id: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "block:move")]
+    BlockMove {
+        note_id: Uuid,
+        block_id: Uuid,
+        new_position: i32,
+        new_parent_id: Option<Uuid>,
+        client_id: String,
+        timestamp: DateTime<Utc>,
+    },
+
+    #[serde(rename = "block:sync_batch")]
+    BlockSyncBatch {
+        note_id: Uuid,
+        blocks: Vec<BlockSnapshot>,
+        timestamp: DateTime<Utc>,
+    },
+
+    // Legacy text-based CRDT ops (kept for backward compatibility during migration)
     #[serde(rename = "op:insert")]
     OpInsert {
         note_id: Uuid,
@@ -129,6 +175,15 @@ pub enum WsMessage {
 pub struct CursorPosition {
     pub line: u32,
     pub column: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BlockSnapshot {
+    pub id: Uuid,
+    pub block_type: String,
+    pub data: serde_json::Value,
+    pub position: i32,
+    pub parent_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]

@@ -4,7 +4,7 @@ use crate::models::note::{
     SearchParams, SearchResponse, UpdateNoteRequest,
 };
 use crate::models::user::User;
-use crate::services::NoteService;
+use crate::services::{ExportService, NoteService, StyleOptions};
 use crate::utils::errors::Result;
 use axum::{
     extract::{Path, Query, State},
@@ -177,17 +177,17 @@ pub async fn search(
     Ok(Json(results))
 }
 
-/// GET /api/v1/notes/:id/export?format=markdown|json
+/// GET /api/v1/notes/:id/export?format=markdown|html|txt|rtf|pdf|epub|json
 #[utoipa::path(
     get,
     path = "/api/v1/notes/{id}/export",
     tag = "Notes",
     params(
         ("id", description = "Note UUID"),
-        ("format", description = "Export format (json or markdown)"),
+        ("format", description = "Export format (json, markdown, html, txt, rtf, pdf, epub)"),
     ),
     responses(
-        (status = 200, description = "Exported note content", body = String),
+        (status = 200, description = "Exported note content", content_type = "application/octet-stream"),
     ),
 )]
 pub async fn export_note(
@@ -195,34 +195,53 @@ pub async fn export_note(
     Extension(user): Extension<User>,
     Path(note_id): Path<Uuid>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<(StatusCode, [(String, String); 1], String)> {
-    let note = note_service.get(note_id, user.id).await?;
-    let format = params.get("format").map(|s| s.as_str()).unwrap_or("json");
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
 
-    match format {
+    let note = note_service.get(note_id, user.id).await?;
+    let blocks = &note.blocks;
+    let format = params.get("format").map(|s| s.as_str()).unwrap_or("json");
+    let opts = StyleOptions::from_params(&params);
+
+    let (status, content_type, body): (StatusCode, &str, Vec<u8>) = match format {
         "markdown" => {
-            let md = format!("# {}\n\n{}", note.title, note.content);
-            Ok((
-                StatusCode::OK,
-                [(
-                    "Content-Type".to_string(),
-                    "text/markdown; charset=utf-8".to_string(),
-                )],
-                md,
-            ))
+            let md = ExportService::blocks_to_markdown(blocks, &note.title, &opts);
+            (StatusCode::OK, "text/markdown; charset=utf-8", md.into_bytes())
+        }
+        "html" => {
+            let html = ExportService::blocks_to_html(blocks, &note.title, &opts);
+            (StatusCode::OK, "text/html; charset=utf-8", html.into_bytes())
+        }
+        "txt" => {
+            let txt = ExportService::blocks_to_plain_text(blocks, &note.title, &opts);
+            (StatusCode::OK, "text/plain; charset=utf-8", txt.into_bytes())
+        }
+        "rtf" => {
+            let rtf = ExportService::blocks_to_rtf(blocks, &note.title, &opts);
+            (StatusCode::OK, "application/rtf", rtf)
+        }
+        "pdf" => {
+            let pdf = ExportService::blocks_to_pdf(blocks, &note.title, &opts)
+                .map_err(|e| crate::utils::errors::AppError::InternalError(e))?;
+            (StatusCode::OK, "application/pdf", pdf)
+        }
+        "epub" => {
+            let epub = ExportService::blocks_to_epub(blocks, &note.title, &opts)
+                .map_err(|e| crate::utils::errors::AppError::InternalError(e))?;
+            (StatusCode::OK, "application/epub+zip", epub)
         }
         _ => {
-            let json = serde_json::to_string_pretty(&note).unwrap_or_default();
-            Ok((
-                StatusCode::OK,
-                [(
-                    "Content-Type".to_string(),
-                    "application/json; charset=utf-8".to_string(),
-                )],
-                json,
-            ))
+            let json = serde_json::to_vec_pretty(&note)
+                .map_err(|e| crate::utils::errors::AppError::InternalError(e.to_string()))?;
+            (StatusCode::OK, "application/json; charset=utf-8", json)
         }
-    }
+    };
+
+    Ok((
+        status,
+        [("Content-Type", content_type)],
+        body,
+    ).into_response())
 }
 
 /// GET /api/v1/notes - Enhanced with filters
