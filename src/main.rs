@@ -66,6 +66,9 @@ use utoipa_swagger_ui::SwaggerUi;
         handlers::notes::delete_note,
         handlers::notes::toggle_favorite,
         handlers::notes::toggle_archive,
+        handlers::notes::restore_note,
+        handlers::notes::permanent_delete_note,
+        handlers::notes::empty_trash,
         handlers::notes::search,
         handlers::notes::list_notes_filtered,
         handlers::notes::export_note,
@@ -268,7 +271,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &config.redis_url,
         config.max_ws_connections,
     );
-    collab_service.spawn_background_tasks();
     tracing::info!("✅ All services initialized");
 
     // Parse CORS allowed origins
@@ -320,7 +322,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/notes/:id", delete(handlers::notes::delete_note))
         .route("/api/v1/notes/:id/favorite", post(handlers::notes::toggle_favorite))
         .route("/api/v1/notes/:id/archive", post(handlers::notes::toggle_archive))
+        .route("/api/v1/notes/:id/restore", post(handlers::notes::restore_note))
+        .route("/api/v1/notes/:id/permanent", delete(handlers::notes::permanent_delete_note))
         .route("/api/v1/notes/:id/export", get(handlers::notes::export_note))
+        .route("/api/v1/notes/trash", delete(handlers::notes::empty_trash))
         .with_state(note_service.clone());
 
     // === TAG ROUTES ===

@@ -95,9 +95,17 @@ impl NoteCollaboratorService {
             return Err(AppError::BadRequest("User is the owner of this note".into()));
         }
 
-        let collab_permission = req.permission.unwrap_or_else(|| "write".into());
+        // Accept both the frontend vocabulary ('edit'/'view') and the
+        // canonical vocabulary ('write'/'read') stored in the database.
+        let collab_permission = req
+            .permission
+            .as_deref()
+            .map(normalize_permission)
+            .unwrap_or_else(|| "write".into());
         if collab_permission != "read" && collab_permission != "write" && collab_permission != "admin" {
-            return Err(AppError::ValidationError("Permission must be 'read', 'write', or 'admin'".into()));
+            return Err(AppError::ValidationError(
+                "Permission must be 'read', 'write', or 'admin' (or 'view'/'edit')".into(),
+            ));
         }
 
         if permission == "admin" && collab_permission == "admin" {
@@ -144,16 +152,19 @@ impl NoteCollaboratorService {
         actor_id: Uuid,
         req: UpdateCollaboratorRequest,
     ) -> Result<CollaboratorInfo> {
-        let permission = self.get_user_permission(note_id, actor_id).await?;
-        if permission != "owner" && permission != "admin" {
+        let actor_permission = self.get_user_permission(note_id, actor_id).await?;
+        if actor_permission != "owner" && actor_permission != "admin" {
             return Err(AppError::Forbidden("Only the owner or admins can change permissions".into()));
         }
 
-        if req.permission != "read" && req.permission != "write" && req.permission != "admin" {
-            return Err(AppError::ValidationError("Permission must be 'read', 'write', or 'admin'".into()));
+        let new_permission = normalize_permission(&req.permission);
+        if new_permission != "read" && new_permission != "write" && new_permission != "admin" {
+            return Err(AppError::ValidationError(
+                "Permission must be 'read', 'write', or 'admin' (or 'view'/'edit')".into(),
+            ));
         }
 
-        if permission == "admin" && req.permission == "admin" {
+        if actor_permission == "admin" && new_permission == "admin" {
             return Err(AppError::Forbidden("Admins cannot grant admin permission".into()));
         }
 
@@ -167,14 +178,14 @@ impl NoteCollaboratorService {
 
         let target_permission = target_perm.ok_or_else(|| AppError::NotFound("Collaborator not found".into()))?;
 
-        if target_permission == "admin" && permission != "owner" {
+        if target_permission == "admin" && actor_permission != "owner" {
             return Err(AppError::Forbidden("Only the owner can change an admin's permissions".into()));
         }
 
         sqlx::query(
             "UPDATE note_collaborators SET permission = $1 WHERE note_id = $2 AND user_id = $3"
         )
-        .bind(&req.permission)
+        .bind(&new_permission)
         .bind(note_id)
         .bind(target_user_id)
         .execute(&self.pool)
@@ -191,7 +202,7 @@ impl NoteCollaboratorService {
             user_id: target_row.try_get("id").unwrap_or_default(),
             display_name: target_row.try_get("display_name").unwrap_or_default(),
             email: target_row.try_get("email").unwrap_or_default(),
-            permission: req.permission,
+            permission: new_permission,
             invited_at: Utc::now(),
         })
     }
@@ -361,5 +372,15 @@ impl NoteCollaboratorService {
         }
 
         Ok(result)
+    }
+}
+
+/// Map the frontend permission vocabulary ('edit'/'view') onto the canonical
+/// vocabulary stored in the database ('write'/'read').
+fn normalize_permission(permission: &str) -> String {
+    match permission {
+        "edit" => "write".into(),
+        "view" => "read".into(),
+        other => other.into(),
     }
 }

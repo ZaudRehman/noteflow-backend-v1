@@ -10,6 +10,7 @@ pub struct Revision {
     pub id: Uuid,
     pub note_id: Uuid,
     pub content: String,
+    pub blocks: serde_json::Value,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
 }
@@ -19,6 +20,7 @@ pub struct RevisionResponse {
     pub id: Uuid,
     pub note_id: Uuid,
     pub content: String,
+    pub blocks: serde_json::Value,
     pub created_by: Uuid,
     pub created_at: DateTime<Utc>,
 }
@@ -29,6 +31,7 @@ impl From<Revision> for RevisionResponse {
             id: revision.id,
             note_id: revision.note_id,
             content: revision.content,
+            blocks: revision.blocks,
             created_by: revision.created_by,
             created_at: revision.created_at,
         }

@@ -223,6 +223,22 @@ impl CollaborationService {
             Ok(m) => m,
             Err(_) => return,
         };
+
+        // Write operations require owner / write / admin (or legacy 'edit')
+        if matches!(
+            msg,
+            WsMessage::NoteUpdated { .. }
+                | WsMessage::OpInsert { .. }
+                | WsMessage::OpDelete { .. }
+                | WsMessage::BlockAdd { .. }
+                | WsMessage::BlockUpdate { .. }
+                | WsMessage::BlockRemove { .. }
+                | WsMessage::BlockMove { .. }
+        ) && !self.verify_write_access(note_id, user_id).await
+        {
+            return;
+        }
+
         match msg {
             WsMessage::CursorMove { position, .. } => {
                 self.handle_cursor_update(note_id, user_id, user_name, position)
@@ -344,25 +360,6 @@ impl CollaborationService {
         })
     }
 
-    async fn store_op(&self, note_id: Uuid, client_id: &str, op_type: &str, position: usize, text: Option<&str>, length: Option<usize>) -> Result<i64> {
-        let row: (i64,) = sqlx::query_as(
-            r#"
-            INSERT INTO collab_operations (note_id, client_id, op_type, position, text_content, length)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id
-            "#,
-        )
-        .bind(note_id)
-        .bind(client_id)
-        .bind(op_type)
-        .bind(position as i32)
-        .bind(text)
-        .bind(length.map(|l| l as i32))
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
-    }
-
     async fn handle_op_insert(
         self: &Arc<Self>,
         note_id: Uuid,
@@ -370,9 +367,6 @@ impl CollaborationService {
         position: usize,
         text: &str,
     ) {
-        if let Ok(op_id) = self.store_op(note_id, client_id, "insert", position, Some(text), None).await {
-            tracing::trace!("Stored op:insert id={} note={} client={}", op_id, note_id, client_id);
-        }
         self.publish(&WsMessage::OpInsert {
             note_id,
             client_id: client_id.to_string(),
@@ -389,9 +383,6 @@ impl CollaborationService {
         position: usize,
         length: usize,
     ) {
-        if let Ok(op_id) = self.store_op(note_id, client_id, "delete", position, None, Some(length)).await {
-            tracing::trace!("Stored op:delete id={} note={} client={}", op_id, note_id, client_id);
-        }
         self.publish(&WsMessage::OpDelete {
             note_id,
             client_id: client_id.to_string(),
@@ -448,6 +439,15 @@ impl CollaborationService {
         parent_id: Option<Uuid>,
         client_id: &str,
     ) {
+        use crate::utils::validation;
+        if let Err(e) = validation::validate_block_type(block_type)
+            .and_then(|_| validation::validate_block_position(position))
+            .and_then(|_| validation::validate_block_data(Some(data), 512 * 1024))
+        {
+            tracing::warn!("Rejected block:add from client {}: {}", client_id, e);
+            return;
+        }
+
         let result = sqlx::query(
             r#"
             INSERT INTO note_blocks (id, note_id, block_type, data, position, parent_id)
@@ -656,101 +656,36 @@ impl CollaborationService {
         }
     }
 
-    /// Periodically apply unapplied collab ops to notes.content and mark them applied.
-    async fn apply_pending_ops(&self) {
-        let unapplied = sqlx::query_as::<_, (Uuid, i64, String, i32, Option<String>, Option<i32>)>(
-            r#"
-            SELECT c.note_id, c.id, c.op_type, c.position, c.text_content, c.length
-            FROM collab_operations c
-            WHERE NOT c.applied
-            ORDER BY c.note_id, c.id
-            LIMIT 1000
-            "#,
+    /// Returns true if the user may apply write operations to the note
+    /// (owner, or collaborator with 'write'/'admin'/'edit' permission).
+    async fn verify_write_access(&self, note_id: Uuid, user_id: Uuid) -> bool {
+        let is_owner: Option<bool> = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM notes WHERE id = $1 AND user_id = $2 AND is_deleted = false)",
         )
-        .fetch_all(&self.pool)
-        .await;
+        .bind(note_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(None);
 
-        let unapplied = match unapplied {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!("Failed to fetch unapplied ops: {}", e);
-                return;
-            }
-        };
-
-        if unapplied.is_empty() {
-            return;
+        if is_owner.unwrap_or(false) {
+            return true;
         }
 
-        use std::collections::HashMap;
-        let mut by_note: HashMap<Uuid, Vec<(i64, String, i32, Option<String>, Option<i32>)>> = HashMap::new();
-        for (note_id, id, op_type, position, text_content, length) in unapplied {
-            by_note.entry(note_id).or_default().push((id, op_type, position, text_content, length));
-        }
+        let is_writer: Option<bool> = sqlx::query_scalar(
+            "SELECT EXISTS(
+                SELECT 1 FROM note_collaborators
+                WHERE note_id = $1 AND user_id = $2
+                  AND permission IN ('write', 'admin', 'edit')
+            )",
+        )
+        .bind(note_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await
+        .unwrap_or(None);
 
-        for (note_id, ops) in &by_note {
-            let current: Option<String> = sqlx::query_scalar(
-                "SELECT content FROM notes WHERE id = $1",
-            )
-            .bind(note_id)
-            .fetch_optional(&self.pool)
-            .await
-            .unwrap_or(None);
-
-            let mut content = current.unwrap_or_default();
-
-            for (_id, op_type, position, text_content, length) in ops {
-                let pos = *position as usize;
-                if pos > content.len() {
-                    continue;
-                }
-                match op_type.as_str() {
-                    "insert" => {
-                        if let Some(text) = text_content {
-                            content.insert_str(pos, text);
-                        }
-                    }
-                    "delete" => {
-                        let len = length.unwrap_or(0) as usize;
-                        let end = (pos + len).min(content.len());
-                        content.drain(pos..end);
-                    }
-                    _ => {}
-                }
-            }
-
-            if let Err(e) = sqlx::query("UPDATE notes SET content = $1, updated_at = NOW() WHERE id = $2")
-                .bind(&content)
-                .bind(note_id)
-                .execute(&self.pool)
-                .await
-            {
-                tracing::error!("Failed to update note content for {}: {}", note_id, e);
-                continue;
-            }
-
-            let ids: Vec<i64> = ops.iter().map(|(id, ..)| *id).collect();
-            if let Err(e) = sqlx::query(
-                "UPDATE collab_operations SET applied = true WHERE id = ANY($1)",
-            )
-            .bind(&ids)
-            .execute(&self.pool)
-            .await
-            {
-                tracing::error!("Failed to mark ops applied: {}", e);
-            }
-        }
-    }
-
-    pub fn spawn_background_tasks(self: &Arc<Self>) {
-        let this = Arc::clone(self);
-        tokio::spawn(async move {
-            let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
-            loop {
-                interval.tick().await;
-                this.apply_pending_ops().await;
-            }
-        });
+        is_writer.unwrap_or(false)
     }
 
     pub async fn handle_connection(self: Arc<Self>, ws: WebSocket, user: User, note_id: Uuid) {

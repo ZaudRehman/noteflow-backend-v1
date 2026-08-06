@@ -55,7 +55,7 @@ impl RevisionService {
         }
 
         let permission: Option<String> = sqlx::query_scalar(
-            "SELECT permission FROM note_collaborators WHERE note_id = $1 AND user_id = $2 AND permission IN ('write', 'admin')",
+            "SELECT permission FROM note_collaborators WHERE note_id = $1 AND user_id = $2 AND permission IN ('write', 'admin', 'edit')",
         )
         .bind(note_id)
         .bind(user_id)
@@ -81,7 +81,7 @@ impl RevisionService {
 
         let revisions = sqlx::query_as::<_, Revision>(
             r#"
-            SELECT r.id, r.note_id, r.content, r.created_by, r.created_at
+            SELECT r.id, r.note_id, r.content, r.blocks, r.created_by, r.created_at
             FROM revisions r
             WHERE r.note_id = $1
             ORDER BY r.created_at DESC
@@ -122,7 +122,7 @@ impl RevisionService {
 
         let revision = sqlx::query_as::<_, Revision>(
             r#"
-            SELECT r.id, r.note_id, r.content, r.created_by, r.created_at
+            SELECT r.id, r.note_id, r.content, r.blocks, r.created_by, r.created_at
             FROM revisions r
             WHERE r.id = $1 AND r.note_id = $2
             "#,
@@ -146,7 +146,7 @@ impl RevisionService {
 
         let revision = sqlx::query_as::<_, Revision>(
             r#"
-            SELECT r.id, r.note_id, r.content, r.created_by, r.created_at
+            SELECT r.id, r.note_id, r.content, r.blocks, r.created_by, r.created_at
             FROM revisions r
             WHERE r.id = $1 AND r.note_id = $2
             "#,
@@ -157,18 +157,70 @@ impl RevisionService {
         .await?
         .ok_or_else(|| AppError::NotFound("Revision not found".to_string()))?;
 
-        sqlx::query!(
-            r#"
-            UPDATE notes
-            SET content = $1, last_edited_by = $2, updated_at = NOW()
-            WHERE id = $3 AND is_deleted = false
-            "#,
-            revision.content,
-            user_id,
-            note_id,
+        let mut tx = self.pool.begin().await?;
+
+        // Rebuild the block table from the snapshot
+        let blocks: Vec<crate::models::collaboration::BlockSnapshot> =
+            serde_json::from_value(revision.blocks.clone()).unwrap_or_default();
+
+        sqlx::query("DELETE FROM note_blocks WHERE note_id = $1")
+            .bind(note_id)
+            .execute(&mut *tx)
+            .await?;
+
+        // Insert blocks in two passes: parents first, then re-link parent_id
+        // (the self-referencing FK requires the referenced block to exist).
+        for block in &blocks {
+            sqlx::query(
+                r#"INSERT INTO note_blocks (id, note_id, block_type, data, position, parent_id)
+                   VALUES ($1, $2, $3, $4, $5, NULL)"#,
+            )
+            .bind(block.id)
+            .bind(note_id)
+            .bind(&block.block_type)
+            .bind(&block.data)
+            .bind(block.position)
+            .execute(&mut *tx)
+            .await?;
+        }
+        for block in &blocks {
+            if let Some(parent_id) = block.parent_id {
+                sqlx::query(
+                    "UPDATE note_blocks SET parent_id = $1 WHERE id = $2 AND note_id = $3",
+                )
+                .bind(parent_id)
+                .bind(block.id)
+                .bind(note_id)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+
+        // Legacy revisions (snapshotted before the block model) only carry
+        // plain text; restore them as a single paragraph block.
+        if blocks.is_empty() && !revision.content.trim().is_empty() {
+            sqlx::query(
+                r#"INSERT INTO note_blocks (note_id, block_type, data, position)
+                   VALUES ($1, 'paragraph', $2, 0)"#,
+            )
+            .bind(note_id)
+            .bind(serde_json::json!({ "text": revision.content }))
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        sqlx::query(
+            r#"UPDATE notes
+               SET content = $1, last_edited_by = $2, updated_at = NOW()
+               WHERE id = $3 AND is_deleted = false"#,
         )
-        .execute(&self.pool)
+        .bind(&revision.content)
+        .bind(user_id)
+        .bind(note_id)
+        .execute(&mut *tx)
         .await?;
+
+        tx.commit().await?;
 
         tracing::info!(
             "Revision {} restored for note {} by user {}",

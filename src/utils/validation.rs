@@ -56,6 +56,52 @@ pub fn validate_tag_name(name: &str) -> Result<()> {
     Ok(())
 }
 
+pub const VALID_BLOCK_TYPES: [&str; 11] = [
+    "paragraph",
+    "heading",
+    "bullet_list",
+    "numbered_list",
+    "todo_list",
+    "quote",
+    "code",
+    "divider",
+    "table",
+    "image",
+    "chart",
+];
+
+pub fn validate_block_type(block_type: &str) -> Result<()> {
+    if !VALID_BLOCK_TYPES.contains(&block_type) {
+        return Err(AppError::ValidationError(format!(
+            "Unsupported block type: {}",
+            block_type
+        )));
+    }
+    Ok(())
+}
+
+pub fn validate_block_position(position: i32) -> Result<()> {
+    if position < 0 {
+        return Err(AppError::ValidationError(
+            "Block position cannot be negative".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+pub fn validate_block_data(data: Option<&serde_json::Value>, max_size: usize) -> Result<()> {
+    if let Some(data) = data {
+        let size = serde_json::to_vec(data).map(|v| v.len()).unwrap_or(0);
+        if size > max_size {
+            return Err(AppError::ValidationError(format!(
+                "Block data exceeds maximum size of {} bytes",
+                max_size
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub fn sanitize_string(input: &str) -> String {
     input.trim().to_string()
 }

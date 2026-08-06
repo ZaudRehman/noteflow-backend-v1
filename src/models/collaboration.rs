@@ -99,6 +99,7 @@ pub enum WsMessage {
         data: serde_json::Value,
         position: i32,
         parent_id: Option<Uuid>,
+        #[serde(alias = "user_id")]
         client_id: String,
         timestamp: DateTime<Utc>,
     },
@@ -108,6 +109,7 @@ pub enum WsMessage {
         note_id: Uuid,
         block_id: Uuid,
         data: serde_json::Value,
+        #[serde(alias = "user_id")]
         client_id: String,
         timestamp: DateTime<Utc>,
     },
@@ -116,6 +118,7 @@ pub enum WsMessage {
     BlockRemove {
         note_id: Uuid,
         block_id: Uuid,
+        #[serde(alias = "user_id")]
         client_id: String,
         timestamp: DateTime<Utc>,
     },
@@ -126,6 +129,7 @@ pub enum WsMessage {
         block_id: Uuid,
         new_position: i32,
         new_parent_id: Option<Uuid>,
+        #[serde(alias = "user_id")]
         client_id: String,
         timestamp: DateTime<Utc>,
     },
@@ -141,6 +145,7 @@ pub enum WsMessage {
     #[serde(rename = "op:insert")]
     OpInsert {
         note_id: Uuid,
+        #[serde(alias = "user_id")]
         client_id: String,
         position: usize,
         text: String,
@@ -150,6 +155,7 @@ pub enum WsMessage {
     #[serde(rename = "op:delete")]
     OpDelete {
         note_id: Uuid,
+        #[serde(alias = "user_id")]
         client_id: String,
         position: usize,
         length: usize,

@@ -50,10 +50,11 @@ impl NoteService {
         .await?;
 
         if let Some(blocks) = &req.blocks {
+            let mut conn = self.pool.acquire().await?;
             for block in blocks {
-                self.insert_block(note.id, block).await?;
+                self.insert_block(&mut conn, note.id, block).await?;
             }
-            self.rebuild_content(note.id).await?;
+            self.rebuild_content(&mut conn, note.id).await?;
         }
 
         self.get(note.id, user_id).await
@@ -112,32 +113,51 @@ impl NoteService {
         let limit = params.limit.unwrap_or(20).min(100);
         let offset = (page - 1) * limit;
 
-        let rows = sqlx::query(
+        let (tag_join, tag_where, bind_tag) = if params.tag.is_some() {
+            (
+                "INNER JOIN note_tags nt ON n.id = nt.note_id
+                 INNER JOIN tags t ON t.id = nt.tag_id",
+                " AND t.user_id = $1 AND t.name = $4",
+                true,
+            )
+        } else {
+            ("", "", false)
+        };
+
+        let query_str = format!(
             r#"SELECT n.id, n.user_id, n.title, n.content, n.last_edited_by, 
                       n.is_favorited, n.is_archived, n.created_at, n.updated_at,
                       nc.permission
                FROM notes n
+               {}
                LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
-               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false
+               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {}
                ORDER BY n.updated_at DESC
                LIMIT $2 OFFSET $3"#,
-        )
-        .bind(user_id)
-        .bind(limit as i64)
-        .bind(offset as i64)
-        .fetch_all(&self.pool)
-        .await?;
+            tag_join, tag_where
+        );
 
-        let total: Option<i64> = sqlx::query_scalar(
-            r#"SELECT COUNT(*) FROM notes n
+        let mut query = sqlx::query(&query_str)
+            .bind(user_id)
+            .bind(limit as i64)
+            .bind(offset as i64);
+        if bind_tag {
+            query = query.bind(params.tag.as_deref().unwrap_or(""));
+        }
+        let rows = query.fetch_all(&self.pool).await?;
+
+        let count_str = format!(
+            r#"SELECT COUNT(*) FROM notes n {}
                LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
-               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false"#,
-        )
-        .bind(user_id)
-        .fetch_one(&self.pool)
-        .await?;
+               WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {}"#,
+            tag_join, tag_where
+        );
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_str).bind(user_id);
+        if bind_tag {
+            count_query = count_query.bind(params.tag.as_deref().unwrap_or(""));
+        }
+        let total: i64 = count_query.fetch_one(&self.pool).await?;
 
-        let total = total.unwrap_or(0);
         self.build_note_responses(rows, user_id).await
             .map(|notes| NoteListResponse { notes, total, page, limit })
     }
@@ -193,9 +213,11 @@ impl NoteService {
         req: UpdateNoteRequest,
     ) -> Result<NoteResponse> {
         let permission = self.collab_service.verify_note_access(note_id, user_id).await?;
-        if permission != "owner" && permission != "write" && permission != "admin" {
+        if !can_write(&permission) {
             return Err(AppError::Forbidden("Not authorized to edit this note".to_string()));
         }
+
+        let mut tx = self.pool.begin().await?;
 
         let note = sqlx::query!(
             r#"SELECT id, user_id, title, content, last_edited_by, 
@@ -204,9 +226,13 @@ impl NoteService {
                WHERE id = $1 AND is_deleted = false"#,
             note_id
         )
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?
         .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
+
+        let old_title = note.title.clone();
+        let old_content = note.content.clone();
+        let old_blocks = self.get_note_blocks_with(&mut tx, note_id).await?;
 
         let title = match req.title {
             Some(ref t) => {
@@ -214,12 +240,14 @@ impl NoteService {
                 validation::validate_note_title(&t)?;
                 t
             }
-            None => note.title.clone(),
+            None => old_title.clone(),
         };
 
+        let mut content_changed = false;
         if let Some(blocks) = &req.blocks {
-            self.sync_blocks(note_id, blocks).await?;
-            self.rebuild_content(note_id).await?;
+            self.sync_blocks(&mut tx, note_id, blocks).await?;
+            let rebuilt = self.rebuild_content(&mut tx, note_id).await?;
+            content_changed = rebuilt != old_content;
         }
 
         sqlx::query!(
@@ -230,22 +258,39 @@ impl NoteService {
             user_id,
             note_id
         )
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await?;
 
-        let updater_name: Option<String> = sqlx::query_scalar(
-            "SELECT display_name FROM users WHERE id = $1",
+        // Snapshot the pre-save state (content + blocks) so history can be restored
+        sqlx::query(
+            r#"INSERT INTO revisions (note_id, content, blocks, created_by)
+               VALUES ($1, $2, $3, $4)"#,
         )
+        .bind(note_id)
+        .bind(&old_content)
+        .bind(serde_json::to_value(&old_blocks).unwrap_or_else(|_| serde_json::json!([])))
         .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await
-        .unwrap_or(None);
+        .execute(&mut *tx)
+        .await?;
 
-        if let Some(ref name) = updater_name {
-            self.notification_service
-                .notify_note_updated(note_id, &title, name, note.user_id)
-                .await
-                .ok();
+        tx.commit().await?;
+
+        let title_changed = title != old_title;
+        if title_changed || content_changed {
+            let updater_name: Option<String> = sqlx::query_scalar(
+                "SELECT display_name FROM users WHERE id = $1",
+            )
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .unwrap_or(None);
+
+            if let Some(ref name) = updater_name {
+                self.notification_service
+                    .notify_note_updated(note_id, &title, name, note.user_id)
+                    .await
+                    .ok();
+            }
         }
 
         self.get(note_id, user_id).await
@@ -304,7 +349,7 @@ impl NoteService {
         let offset = (page - 1) * limit;
 
         let sort_by = params.sort_by.as_deref().unwrap_or("updated_at");
-        let sort_order = params.sort_order.as_deref().unwrap_or("DESC");
+        let sort_order = params.sort_order.as_deref().unwrap_or("DESC").to_ascii_uppercase();
 
         let valid_sort_fields = ["created_at", "updated_at", "title"];
         if !valid_sort_fields.contains(&sort_by) {
@@ -317,10 +362,14 @@ impl NoteService {
             ));
         }
 
-        let (filter_clause, _is_archived_filter) = match params.filter.as_deref() {
-            Some("favorites") => ("AND n.is_favorited = true AND n.is_archived = false", false),
-            Some("archived") => ("AND n.is_archived = true", true),
-            _ => ("AND n.is_archived = false", false),
+        let (filter_clause, deleted_clause) = match params.filter.as_deref() {
+            Some("favorites") => (
+                "AND n.is_favorited = true AND n.is_archived = false",
+                "AND n.is_deleted = false",
+            ),
+            Some("archived") => ("AND n.is_archived = true", "AND n.is_deleted = false"),
+            Some("deleted") => ("", "AND n.is_deleted = true"),
+            _ => ("AND n.is_archived = false", "AND n.is_deleted = false"),
         };
 
         let (tag_join, tag_filter) = if params.tag_id.is_some() {
@@ -339,11 +388,11 @@ impl NoteService {
             FROM notes n
             {}
             LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1
-            WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {} {}
+            WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) {} {} {}
             ORDER BY n.{} {}
             LIMIT $2 OFFSET $3
             "#,
-            tag_join, filter_clause, tag_filter, sort_by, sort_order
+            tag_join, deleted_clause, filter_clause, tag_filter, sort_by, sort_order
         );
 
         let mut query = sqlx::query(&query_str)
@@ -358,8 +407,8 @@ impl NoteService {
         let notes = query.fetch_all(&self.pool).await?;
 
         let count_query = format!(
-            r#"SELECT COUNT(*) as count FROM notes n {} LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1 WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) AND n.is_deleted = false {} {}"#,
-            tag_join, filter_clause, tag_filter
+            r#"SELECT COUNT(*) as count FROM notes n {} LEFT JOIN note_collaborators nc ON n.id = nc.note_id AND nc.user_id = $1 WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL) {} {} {}"#,
+            tag_join, deleted_clause, filter_clause, tag_filter
         );
 
         let mut count_bind = sqlx::query_scalar(&count_query)
@@ -400,7 +449,7 @@ impl NoteService {
             WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL)
                 AND n.is_deleted = false
                 AND (
-                    to_tsvector('english', n.title || ' ' || n.content) @@ plainto_tsquery('english', $2)
+                    to_tsvector('simple', n.title || ' ' || n.content) @@ plainto_tsquery('simple', $2)
                     OR n.title ILIKE $3
                     OR n.content ILIKE $3
                 )
@@ -410,7 +459,7 @@ impl NoteService {
                     WHEN n.content ILIKE $3 THEN 2
                     ELSE 3
                 END,
-                ts_rank(to_tsvector('english', n.title || ' ' || n.content), plainto_tsquery('english', $2)) DESC,
+                ts_rank(to_tsvector('simple', n.title || ' ' || n.content), plainto_tsquery('simple', $2)) DESC,
                 n.updated_at DESC
             LIMIT $4
             "#,
@@ -429,7 +478,7 @@ impl NoteService {
             WHERE (n.user_id = $1 OR nc.user_id IS NOT NULL)
                 AND n.is_deleted = false
                 AND (
-                    to_tsvector('english', n.title || ' ' || n.content) @@ plainto_tsquery('english', $2)
+                    to_tsvector('simple', n.title || ' ' || n.content) @@ plainto_tsquery('simple', $2)
                     OR n.title ILIKE $3
                     OR n.content ILIKE $3
                 )
@@ -447,7 +496,16 @@ impl NoteService {
 
     // ── Block operations ──
 
-    async fn insert_block(&self, note_id: Uuid, block: &CreateBlockRequest) -> Result<()> {
+    async fn insert_block(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        note_id: Uuid,
+        block: &CreateBlockRequest,
+    ) -> Result<()> {
+        validation::validate_block_type(&block.block_type)?;
+        validation::validate_block_data(Some(&block.data), self.config.max_note_size)?;
+        validation::validate_block_position(block.position)?;
+
         sqlx::query(
             r#"
             INSERT INTO note_blocks (note_id, block_type, data, position, parent_id)
@@ -459,7 +517,7 @@ impl NoteService {
         .bind(&block.data)
         .bind(block.position)
         .bind(block.parent_id)
-        .execute(&self.pool)
+        .execute(&mut *conn)
         .await?;
         Ok(())
     }
@@ -475,6 +533,26 @@ impl NoteService {
         )
         .bind(note_id)
         .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(BlockData::from).collect())
+    }
+
+    async fn get_note_blocks_with(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        note_id: Uuid,
+    ) -> Result<Vec<BlockData>> {
+        let rows = sqlx::query_as::<_, crate::models::block::Block>(
+            r#"
+            SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
+            FROM note_blocks
+            WHERE note_id = $1
+            ORDER BY position ASC, created_at ASC
+            "#,
+        )
+        .bind(note_id)
+        .fetch_all(&mut *conn)
         .await?;
 
         Ok(rows.into_iter().map(BlockData::from).collect())
@@ -505,65 +583,72 @@ impl NoteService {
         Ok(map)
     }
 
-    async fn sync_blocks(&self, note_id: Uuid, blocks: &[UpdateBlockRequest]) -> Result<()> {
+    async fn sync_blocks(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        note_id: Uuid,
+        blocks: &[UpdateBlockRequest],
+    ) -> Result<()> {
         for block in blocks {
-            if let Some(block_type) = &block.block_type {
-                sqlx::query(
-                    r#"
-                    INSERT INTO note_blocks (note_id, block_type, data, position, parent_id)
-                    VALUES ($1, $2, '{}'::jsonb, 0, NULL)
-                    RETURNING id
-                    "#,
-                )
-                .bind(note_id)
-                .bind(block_type)
-                .execute(&self.pool)
-                .await?;
-            } else {
-                let mut set_clauses = Vec::new();
-                let mut param_count = 0;
-
-                if block.data.is_some() {
-                    param_count += 1;
-                    set_clauses.push(format!("data = ${}", param_count + 1));
-                }
-                if block.position.is_some() {
-                    param_count += 1;
-                    set_clauses.push(format!("position = ${}", param_count + 1));
-                }
-                if block.parent_id.is_some() {
-                    param_count += 1;
-                    set_clauses.push(format!("parent_id = ${}", param_count + 1));
-                }
-
-                if set_clauses.is_empty() {
-                    continue;
-                }
-
-                let sql = format!(
-                    "UPDATE note_blocks SET {} WHERE id = $1 AND note_id = $2",
-                    set_clauses.join(", ")
-                );
-
-                let mut q = sqlx::query(&sql).bind(block.id).bind(note_id);
-
-                if let Some(ref data) = block.data {
-                    q = q.bind(data);
-                }
-                if let Some(pos) = block.position {
-                    q = q.bind(pos);
-                }
-                if let Some(pid) = block.parent_id {
-                    q = q.bind(pid);
-                }
-
-                q.execute(&self.pool).await?;
+            if let Some(ref block_type) = block.block_type {
+                validation::validate_block_type(block_type)?;
             }
+            validation::validate_block_data(block.data.as_ref(), self.config.max_note_size)?;
+            if let Some(position) = block.position {
+                validation::validate_block_position(position)?;
+            }
+
+            let mut set_clauses = vec![
+                "block_type = COALESCE(EXCLUDED.block_type, note_blocks.block_type)"
+                    .to_string(),
+                "data = COALESCE(EXCLUDED.data, note_blocks.data)".to_string(),
+                "position = COALESCE(EXCLUDED.position, note_blocks.position)".to_string(),
+            ];
+            if block.parent_id.is_some() {
+                set_clauses.push("parent_id = EXCLUDED.parent_id".to_string());
+            }
+
+            let sql = format!(
+                "INSERT INTO note_blocks (id, note_id, block_type, data, position, parent_id)
+                 VALUES ($1, $2, COALESCE($3, 'paragraph'), COALESCE($4, '{{}}'::jsonb), COALESCE($5, 0), $6)
+                 ON CONFLICT (id) DO UPDATE SET {}
+                 WHERE note_blocks.note_id = $2",
+                set_clauses.join(", ")
+            );
+
+            sqlx::query(&sql)
+                .bind(block.id)
+                .bind(note_id)
+                .bind(&block.block_type)
+                .bind(block.data.as_ref())
+                .bind(block.position)
+                .bind(block.parent_id.flatten())
+                .execute(&mut *conn)
+                .await?;
+        }
+
+        // Remove blocks that were deleted in the editor and are absent from the request
+        let ids: Vec<Uuid> = blocks.iter().map(|b| b.id).collect();
+        if ids.is_empty() {
+            sqlx::query("DELETE FROM note_blocks WHERE note_id = $1")
+                .bind(note_id)
+                .execute(&mut *conn)
+                .await?;
+        } else {
+            sqlx::query("DELETE FROM note_blocks WHERE note_id = $1 AND NOT (id = ANY($2))")
+                .bind(note_id)
+                .bind(&ids)
+                .execute(&mut *conn)
+                .await?;
         }
         Ok(())
     }
 
-    async fn rebuild_content(&self, note_id: Uuid) -> Result<()> {
+    async fn rebuild_content(
+        &self,
+        conn: &mut sqlx::PgConnection,
+        note_id: Uuid,
+    ) -> Result<String> {
         let blocks = sqlx::query_as::<_, crate::models::block::Block>(
             r#"
             SELECT id, note_id, block_type, data, position, parent_id, created_at, updated_at
@@ -573,20 +658,20 @@ impl NoteService {
             "#,
         )
         .bind(note_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *conn)
         .await?;
 
         let plain_text = blocks_to_plain_text(&blocks);
 
-        sqlx::query!(
+        sqlx::query(
             "UPDATE notes SET content = $1, updated_at = NOW() WHERE id = $2",
-            plain_text,
-            note_id
         )
-        .execute(&self.pool)
+        .bind(&plain_text)
+        .bind(note_id)
+        .execute(&mut *conn)
         .await?;
 
-        Ok(())
+        Ok(plain_text)
     }
 
     // ── Helpers ──
@@ -710,6 +795,60 @@ impl NoteService {
 
         Ok(blocks)
     }
+
+    // ── Trash (soft-deleted notes) ──
+
+    pub async fn restore_note(&self, note_id: Uuid, user_id: Uuid) -> Result<NoteResponse> {
+        self.verify_ownership_any_state(note_id, user_id).await?;
+
+        sqlx::query(
+            "UPDATE notes SET is_deleted = false, is_archived = false, updated_at = NOW() WHERE id = $1",
+        )
+        .bind(note_id)
+        .execute(&self.pool)
+        .await?;
+
+        self.get(note_id, user_id).await
+    }
+
+    pub async fn permanent_delete(&self, note_id: Uuid, user_id: Uuid) -> Result<()> {
+        self.verify_ownership_any_state(note_id, user_id).await?;
+
+        sqlx::query("DELETE FROM notes WHERE id = $1")
+            .bind(note_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn empty_trash(&self, user_id: Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM notes WHERE user_id = $1 AND is_deleted = true")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
+
+        Ok(())
+    }
+
+    async fn verify_ownership_any_state(&self, note_id: Uuid, user_id: Uuid) -> Result<()> {
+        let exists: Option<bool> = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM notes WHERE id = $1 AND user_id = $2)",
+        )
+        .bind(note_id)
+        .bind(user_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        if !exists.unwrap_or(false) {
+            return Err(AppError::NotFound("Note not found or access denied".into()));
+        }
+        Ok(())
+    }
+}
+
+fn can_write(permission: &str) -> bool {
+    matches!(permission, "owner" | "write" | "admin" | "edit")
 }
 
 /// Convert blocks to plain text for full-text search indexing

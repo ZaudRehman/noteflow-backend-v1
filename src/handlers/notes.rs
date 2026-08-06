@@ -262,3 +262,64 @@ pub async fn list_notes_filtered(
     let notes = note_service.list_filtered(user.id, params).await?;
     Ok(Json(notes))
 }
+
+/// POST /api/v1/notes/:id/restore
+#[utoipa::path(
+    post,
+    path = "/api/v1/notes/{id}/restore",
+    tag = "Notes",
+    params(
+        ("id", description = "Note UUID"),
+    ),
+    responses(
+        (status = 200, description = "Note restored", body = NoteResponse),
+        (status = 404, description = "Note not found"),
+    ),
+)]
+pub async fn restore_note(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Path(note_id): Path<Uuid>,
+) -> Result<Json<NoteResponse>> {
+    let note = note_service.restore_note(note_id, user.id).await?;
+    Ok(Json(note))
+}
+
+/// DELETE /api/v1/notes/:id/permanent
+#[utoipa::path(
+    delete,
+    path = "/api/v1/notes/{id}/permanent",
+    tag = "Notes",
+    params(
+        ("id", description = "Note UUID"),
+    ),
+    responses(
+        (status = 204, description = "Note permanently deleted"),
+        (status = 404, description = "Note not found"),
+    ),
+)]
+pub async fn permanent_delete_note(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+    Path(note_id): Path<Uuid>,
+) -> Result<StatusCode> {
+    note_service.permanent_delete(note_id, user.id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// DELETE /api/v1/notes/trash
+#[utoipa::path(
+    delete,
+    path = "/api/v1/notes/trash",
+    tag = "Notes",
+    responses(
+        (status = 204, description = "Trash emptied"),
+    ),
+)]
+pub async fn empty_trash(
+    State(note_service): State<Arc<NoteService>>,
+    Extension(user): Extension<User>,
+) -> Result<StatusCode> {
+    note_service.empty_trash(user.id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
